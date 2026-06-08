@@ -870,6 +870,7 @@ body {
         <option value="vergi">Vergi</option>
         <option value="diger">Diğer</option>
         <option value="taksit">Taksitler</option>
+        <option value="kredi-karti">💳 Kredi Kartı</option>
       </select>
       <select class="form-control" style="width:140px;" id="filter-para" onchange="renderOdemeler()">
         <option value="">Tüm Paralar</option>
@@ -879,6 +880,7 @@ body {
         <option value="XAU">🥇 Altın</option>
       </select>
     </div>
+    <button class="btn btn-outline" onclick="openKrediKartModal()" style="background:#fdf2f8;border-color:#db2777;color:#db2777;font-weight:600;">💳 Kredi Kartı Ekle</button>
     <button class="btn btn-primary" onclick="openModal('odeme-modal')">+ Ödeme Ekle</button>
   </div>
 
@@ -1426,6 +1428,75 @@ body {
   </div>
 </div>
 
+<!-- KREDİ KARTI EKLE MODAL -->
+<div class="modal-overlay" id="kredi-karti-modal">
+  <div class="modal" style="width:540px;">
+    <div class="modal-header">
+      <span class="modal-title">💳 Kredi Kartı Borcu Ekle</span>
+      <button class="modal-close" onclick="closeModal('kredi-karti-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Kart Adı / Açıklama <span style="color:var(--c-red)">*</span></label>
+          <input type="text" class="form-control" id="kk-aciklama" placeholder="ör: Garanti Bonus Kart">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Banka</label>
+          <input type="text" class="form-control" id="kk-banka" placeholder="ör: Garanti, Yapı Kredi...">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Toplam Borç <span style="color:var(--c-red)">*</span></label>
+          <input type="number" class="form-control" id="kk-tutar" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Para Birimi</label>
+          <select class="form-control" id="kk-para">
+            <option value="TL">₺ TL</option>
+            <option value="USD">$ USD</option>
+            <option value="EUR">€ EUR</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Asgari Ödeme</label>
+          <input type="number" class="form-control" id="kk-asgari" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Son Ödeme Tarihi <span style="color:var(--c-red)">*</span></label>
+          <input type="date" class="form-control" id="kk-vade">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Şirket / Kişi</label>
+          <select class="form-control" id="kk-entity">
+            <option value="solariz">Solariz</option>
+            <option value="nexgen">NexGen</option>
+            <option value="pera">Pera AŞ</option>
+            <option value="sahsi">Şahsi</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ne İçin Kullanıldı</label>
+          <input type="text" class="form-control" id="kk-neicin" placeholder="ör: Malzeme alımı, seyahat...">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Not (opsiyonel)</label>
+        <input type="text" class="form-control" id="kk-not" placeholder="Ek not...">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('kredi-karti-modal')">İptal</button>
+      <button class="btn btn-primary" style="background:#db2777;border-color:#db2777;" onclick="saveKrediKart()">💳 Kaydet</button>
+    </div>
+  </div>
+</div>
+
 <!-- KREDİ MODAL -->
 <div class="modal-overlay" id="kredi-modal">
   <div class="modal" style="width:580px;">
@@ -1887,7 +1958,7 @@ function statusBadge(durum) {
 }
 
 function tipLabel(t) {
-  var map = { tedarikci:'Cari', kredi:'Kredi', kira:'Kira', fatura:'Fatura', maas:'Maaş', vergi:'Vergi', diger:'Diğer' };
+  var map = { tedarikci:'Cari', kredi:'Kredi', kira:'Kira', fatura:'Fatura', maas:'Maaş', vergi:'Vergi', diger:'Diğer', 'kredi-karti':'Kredi Kartı' };
   return map[t] || t;
 }
 
@@ -1898,6 +1969,7 @@ function tipLabel(t) {
 
 
 function refreshAll() {
+  loadKurlar();
   renderAlerts();
   renderSummaryCards();
   renderUpcoming();
@@ -1910,7 +1982,6 @@ function refreshAll() {
   renderCalendar();
   renderNakit();
   renderPlanlama();
-  loadKurlar();
 }
 
 // ============================================================
@@ -2631,29 +2702,23 @@ function renderSummaryCards() {
   }
 
   // Genel borç özeti — sadece kalan/bekleyen borçlar
-  if (document.getElementById('oz-genel-toplam')) {
+  if (document.getElementById('oz-gt-toplam')) {
     var digerOdemeler = odemeler.filter(function(o){ return o.tip !== 'taksit'; });
-    var digerKalanTutar = digerOdemeler.filter(function(o){return o.durum!=='odendi';}).reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-    var digerOdenenTutar = digerOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
+    var digerKalanTutar  = digerOdemeler.filter(function(o){return o.durum!=='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
+    var digerOdenenTutar = digerOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
 
-    // Toplam = kredi toplam + çek toplam (gerçek borç büyüklükleri)
-    // Kalan = kredi kalan + çek bekleyen + diğer bekleyen
     var genelKalanTutar  = krediKalan + cekBekleyen + digerKalanTutar;
     var genelOdenenTutar = krediOdenen + cekOdenen + digerOdenenTutar;
     var genelToplamTutar = genelKalanTutar + genelOdenenTutar;
     var genelPct = genelToplamTutar > 0 ? Math.min(100, Math.round((genelOdenenTutar/genelToplamTutar)*100)) : 0;
 
-    document.getElementById('oz-genel-toplam').textContent = fmtCurrency(genelToplamTutar);
-    document.getElementById('oz-genel-odenen').textContent = fmtCurrency(genelOdenenTutar);
-    document.getElementById('oz-genel-kalan').textContent  = fmtCurrency(genelKalanTutar);
-    document.getElementById('oz-genel-pct').textContent    = '%' + genelPct;
-    document.getElementById('oz-genel-bar').style.width    = genelPct + '%';
-    document.getElementById('oz-genel-adet').textContent   =
-      'Kredi kalani + Çek bekleyen + Diger bekleyen ödemeler toplamı';
-    document.getElementById('oz-g-kredi').textContent  = 'Kalan: ' + fmtCurrency(krediKalan);
-    document.getElementById('oz-g-cek').textContent    = 'Kalan: ' + fmtCurrency(cekBekleyen);
-    document.getElementById('oz-g-diger').textContent  = 'Kalan: ' + fmtCurrency(digerKalanTutar);
-    document.getElementById('oz-genel-detay').textContent = '%' + genelPct + ' ödendi · %' + (100-genelPct) + ' kaldı';
+    document.getElementById('oz-gt-toplam').textContent  = fmtCurrency(genelToplamTutar);
+    document.getElementById('oz-gt-odenen').textContent  = fmtCurrency(genelOdenenTutar);
+    document.getElementById('oz-gt-kalan').textContent   = fmtCurrency(genelKalanTutar);
+    var barEl = document.getElementById('oz-gt-bar');
+    if (barEl) barEl.innerHTML = '<div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;">' +
+      '<div style="height:6px;width:' + genelPct + '%;background:linear-gradient(90deg,#16a34a,#34d399);border-radius:3px;"></div></div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:2px;">%' + genelPct + ' ödendi</div>';
   }
 }
 
@@ -2745,18 +2810,18 @@ function renderMonthlyChart() {
     return odemeler.filter(o => {
       var d = parseDate(o.vade);
       return d && d.getFullYear() === m.year && d.getMonth() === m.month;
-    }).reduce((s,o)=>s+parseFloat(o.tutar||0),0);
+    }).reduce((s,o)=>s+toTL(o),0);
   }));
 
   document.getElementById('monthly-chart').innerHTML = months.map(m => {
     var paid = odemeler.filter(o => {
       var d = parseDate(o.vade);
       return d && d.getFullYear()===m.year && d.getMonth()===m.month && o.durum==='odendi';
-    }).reduce((s,o)=>s+parseFloat(o.tutar||0),0);
+    }).reduce((s,o)=>s+toTL(o),0);
     var pend = odemeler.filter(o => {
       var d = parseDate(o.vade);
       return d && d.getFullYear()===m.year && d.getMonth()===m.month && o.durum!=='odendi';
-    }).reduce((s,o)=>s+parseFloat(o.tutar||0),0);
+    }).reduce((s,o)=>s+toTL(o),0);
 
     var pH = Math.round((paid/maxVal)*100);
     var peH = Math.round((pend/maxVal)*100);
@@ -2887,7 +2952,11 @@ function renderOdemeler() {
         '<div style="font-weight:600;">' + o.aciklama + '</div>' +
         (o.not_ || o.not ? '<div style="font-size:10px;color:var(--muted);">' + (o.not_||o.not) + '</div>' : '') +
       '</td>' +
-      '<td><span class="badge badge-blue">' + tipLabel(o.tip) + '</span></td>' +
+      '<td>' +
+        (o.tip === 'kredi-karti'
+          ? '<span class="badge" style="background:#fdf2f8;color:#db2777;border:1px solid #fbcfe8;font-weight:700;">💳 Kredi Kartı</span>'
+          : '<span class="badge badge-blue">' + tipLabel(o.tip) + '</span>') +
+      '</td>' +
       '<td>' +
         '<div style="font-weight:700;color:' + (o.durum==='gecikti'?'var(--red)':'var(--text)') + ';">' +
           fmtCurrency(o.tutar, o.para) + paraBadge +
@@ -3539,8 +3608,8 @@ var _cfSecAy = new Date().getMonth();
 var _cfSecTarih = null;
 
 var AY_ADI_CF = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
-var TIP_RENK_CF = { taksit:'#2563eb', kredi:'#2563eb', tedarikci:'#7c3aed', maas:'#0891b2', vergi:'#ea580c', diger:'#6b7280', cek:'#7c3aed' };
-var TIP_ETK_CF  = { taksit:'Kredi', kredi:'Kredi', tedarikci:'Cari', maas:'Maaş', vergi:'Vergi', diger:'Diğer', cek:'Çek' };
+var TIP_RENK_CF = { taksit:'#2563eb', kredi:'#2563eb', tedarikci:'#7c3aed', maas:'#0891b2', vergi:'#ea580c', diger:'#6b7280', cek:'#7c3aed', 'kredi-karti':'#db2777' };
+var TIP_ETK_CF  = { taksit:'Kredi', kredi:'Kredi', tedarikci:'Cari', maas:'Maaş', vergi:'Vergi', diger:'Diğer', cek:'Çek', 'kredi-karti':'KK' };
 
 function cfGelirEkle() {
   var aciklama = document.getElementById('cf-gelir-aciklama').value.trim();
@@ -4221,6 +4290,64 @@ function clearKrediForm() {
   if (bilgi) bilgi.style.display = 'none';
   var titleEl = document.getElementById('kredi-modal-title');
   if (titleEl) titleEl.textContent = '🏦 Kredi / Taksit Ekle';
+}
+
+// ============================================================
+// KREDİ KARTI
+// ============================================================
+
+function openKrediKartModal() {
+  document.getElementById('kk-aciklama').value = '';
+  document.getElementById('kk-banka').value = '';
+  document.getElementById('kk-tutar').value = '';
+  document.getElementById('kk-para').value = 'TL';
+  document.getElementById('kk-asgari').value = '';
+  document.getElementById('kk-vade').value = '';
+  document.getElementById('kk-entity').value = 'solariz';
+  document.getElementById('kk-neicin').value = '';
+  document.getElementById('kk-not').value = '';
+  openModal('kredi-karti-modal');
+}
+
+function saveKrediKart() {
+  var aciklama = (document.getElementById('kk-aciklama').value || '').trim();
+  var banka    = (document.getElementById('kk-banka').value || '').trim();
+  var tutar    = parseFloat(document.getElementById('kk-tutar').value);
+  var para     = document.getElementById('kk-para').value || 'TL';
+  var asgari   = parseFloat(document.getElementById('kk-asgari').value) || 0;
+  var vade     = document.getElementById('kk-vade').value;
+  var entity   = document.getElementById('kk-entity').value || 'solariz';
+  var neicin   = (document.getElementById('kk-neicin').value || '').trim();
+  var notEk    = (document.getElementById('kk-not').value || '').trim();
+
+  if (!aciklama)          { alert('Kart adı / açıklama zorunludur'); return; }
+  if (!tutar || tutar <= 0) { alert('Geçerli bir toplam borç tutarı giriniz'); return; }
+  if (!vade)              { alert('Son ödeme tarihi zorunludur'); return; }
+
+  var notParts = [];
+  if (asgari > 0) notParts.push('Asgari: ' + fmtCurrency(asgari, para));
+  if (neicin)     notParts.push('Ne için: ' + neicin);
+  if (notEk)      notParts.push(notEk);
+  var notStr = notParts.join(' | ');
+
+  apiPost('/api/odemeler', {
+    entity:       entity,
+    aciklama:     aciklama,
+    tip:          'kredi-karti',
+    tutar:        tutar,
+    para:         para,
+    vade:         vade,
+    odeme_tarihi: '',
+    durum:        'bekliyor',
+    tekrar:       'tek',
+    not:          notStr || 'Kredi Kartı',
+    banka:        banka || null,
+    kaydeden:     currentUser ? currentUser.ad : 'manuel'
+  });
+
+  _cache.loaded = false;
+  closeModal('kredi-karti-modal');
+  refreshAll();
 }
 
 // ============================================================
