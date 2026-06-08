@@ -2756,13 +2756,20 @@ function renderBorcOzeti() {
 
   var satirlar = [];
 
-  // --- 1) KREDİLER — krediler tablosundan (taksit kayıtlarına bağlı değil) ---
-  if (krediler.length) {
-    var kToplam  = krediler.reduce(function(s,k){ return s + parseFloat(k.toplam||0); }, 0);
-    var kKalan   = krediler.reduce(function(s,k){ return s + parseFloat(k.kalan_taksit||0) * parseFloat(k.taksit||0); }, 0);
-    var kOdenen  = kToplam - kKalan;
-    var kPct     = kToplam > 0 ? Math.min(100, Math.round((kOdenen / kToplam) * 100)) : 0;
-    satirlar.push(satirHtml('🏦 Krediler', '#2563eb', kKalan, kOdenen, kToplam, krediler.length, kPct));
+  // --- 1) KREDİLER ---
+  // ödenen/kalan: odemeler.tip='taksit' kayıtlarından (gerçek durum)
+  // toplam: krediler tablosundaki beyan edilen toplam; yoksa ödenen+kalan
+  var taksitItems = odemeler.filter(function(o){ return o.tip === 'taksit'; });
+  var kOdenen = taksitItems.filter(function(o){ return o.durum === 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
+  var kKalan  = taksitItems.filter(function(o){ return o.durum !== 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
+  var kToplam = krediler.length
+    ? krediler.reduce(function(s,k){ return s + parseFloat(k.toplam||0); }, 0)
+    : kOdenen + kKalan;
+  if (!kToplam) kToplam = kOdenen + kKalan;
+  var kAdet   = krediler.length || taksitItems.length;
+  var kPct    = kToplam > 0 ? Math.min(100, Math.round((kOdenen / kToplam) * 100)) : 0;
+  if (kToplam > 0 || kOdenen > 0 || kKalan > 0) {
+    satirlar.push(satirHtml('🏦 Krediler', '#2563eb', kKalan, kOdenen, kToplam, kAdet, kPct));
   }
 
   // --- 2) ÖDEMELER kaynaklı kategoriler — durum filtresiyle doğrudan kalan ---
