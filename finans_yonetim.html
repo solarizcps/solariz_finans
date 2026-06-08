@@ -919,7 +919,7 @@ body {
         style="background:var(--accent);color:#fff;border:none;">Aktif Krediler</button>
       <button class="btn btn-sm btn-outline" id="kredi-filtre-tumu" onclick="krediFiltreDegistir('tumu')">Tümünü Göster</button>
     </div>
-    <button class="btn btn-primary" onclick="openModal('kredi-modal')">+ Kredi / Taksit Ekle</button>
+    <button class="btn btn-primary" onclick="clearKrediForm();openModal('kredi-modal')">+ Kredi / Taksit Ekle</button>
   </div>
 
   <div id="kredi-list-container">
@@ -1502,7 +1502,7 @@ body {
   <div class="modal" style="width:580px;">
     <div class="modal-header">
       <span class="modal-title" id="kredi-modal-title">🏦 Kredi / Taksit Ekle</span>
-      <button class="modal-close" onclick="closeModal('kredi-modal')">✕</button>
+      <button class="modal-close" onclick="closeModal('kredi-modal');clearKrediForm()">✕</button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="kredi-id">
@@ -1585,7 +1585,7 @@ body {
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('kredi-modal')">İptal</button>
+      <button class="btn btn-outline" onclick="closeModal('kredi-modal');clearKrediForm()">İptal</button>
       <button class="btn btn-primary" onclick="saveKredi()">💾 Kaydet</button>
     </div>
   </div>
