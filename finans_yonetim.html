@@ -1521,14 +1521,15 @@ body {
 </div>
 
 <!-- QUICK ADD MODAL -->
-<!-- ÇEK EKLE MODAL -->
+<!-- ÇEK EKLE / DÜZENLE MODAL -->
 <div class="modal-overlay" id="cek-modal">
   <div class="modal" style="width:520px;">
     <div class="modal-header">
-      <span class="modal-title">📄 Çek Ekle</span>
+      <span class="modal-title" id="cek-modal-title">📄 Çek Ekle</span>
       <button class="modal-close" onclick="closeModal('cek-modal')">✕</button>
     </div>
     <div class="modal-body">
+      <input type="hidden" id="cek-edit-id" value="">
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Firma / Alıcı <span style="color:var(--c-red)">*</span></label>
@@ -1988,6 +1989,8 @@ function renderCekler() {
       var yaz = o.durum==='odendi' ? '✓ Ödendi' : o.durum==='gecikti' ? '! Gecikti' : '⏳ Bekliyor';
       var bankaHtml = o.banka ? '<span style="font-size:10px;background:#eff6ff;color:#2563eb;padding:1px 6px;border-radius:8px;font-weight:600;">' + o.banka + '</span>' : '<span style="font-size:10px;color:#9ca3af;">-</span>';
       var cekNoHtml = o.cek_no ? '<span style="font-size:10px;color:#374151;font-family:monospace;">' + o.cek_no + '</span>' : '<span style="font-size:10px;color:#9ca3af;">-</span>';
+      var notVal = (o.not_ && o.not_ !== 'Çek') ? o.not_ : '';
+      var notHtml = notVal ? '<span style="font-size:11px;color:#374151;" title="' + notVal.replace(/"/g,'&quot;') + '">' + notVal + '</span>' : '<span style="font-size:10px;color:#9ca3af;">-</span>';
       return '<tr style="background:' + bg + ';border-bottom:1px solid #e8eaf0;">' +
         '<td style="padding:10px 20px;font-size:13px;font-weight:500;">' + alici + '</td>' +
         '<td style="padding:10px 16px;">' + bankaHtml + '</td>' +
@@ -1995,8 +1998,10 @@ function renderCekler() {
         '<td style="padding:10px 16px;font-size:12px;color:#6b7280;">' + (o.vade||'-') + '</td>' +
         '<td style="padding:10px 16px;font-size:13px;font-weight:700;">' + fmtCurrency(o.tutar) + '</td>' +
         '<td style="padding:10px 16px;"><span style="font-size:11px;font-weight:700;color:' + clr + ';">' + yaz + '</span></td>' +
-        '<td style="padding:10px 16px;text-align:right;">' +
-          (o.durum!=='odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');_cache.loaded=false;renderCekler();">✓ Öde</button>' : '') +
+        '<td style="padding:10px 16px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + notHtml + '</td>' +
+        '<td style="padding:10px 16px;text-align:right;white-space:nowrap;">' +
+          (o.durum!=='odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');_cache.loaded=false;renderCekler();">✓ Öde</button> ' : '') +
+          '<button class="btn btn-xs btn-outline" onclick="openCekEditModal(' + JSON.stringify(o).replace(/</g,'\\u003c') + ')">✏️</button>' +
         '</td>' +
       '</tr>';
     }).join('');
@@ -2041,6 +2046,7 @@ function renderCekler() {
             '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Vade</th>' +
             '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Tutar</th>' +
             '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Durum</th>' +
+            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Not</th>' +
             '<th></th>' +
           '</tr></thead>' +
           '<tbody>' + satirlar + '</tbody>' +
@@ -3866,8 +3872,10 @@ function deleteOdeme(id) {
   refreshAll();
 }
 
-// ÇEK EKLE
+// ÇEK EKLE / DÜZENLE
 function openCekModal() {
+  document.getElementById('cek-edit-id').value = '';
+  document.getElementById('cek-modal-title').textContent = '📄 Çek Ekle';
   document.getElementById('cek-firma').value = '';
   document.getElementById('cek-vade').value = '';
   document.getElementById('cek-tutar').value = '';
@@ -3878,7 +3886,23 @@ function openCekModal() {
   openModal('cek-modal');
 }
 
+function openCekEditModal(o) {
+  var firma = (o.aciklama || '').replace(/^Çek:\s*/, '');
+  document.getElementById('cek-edit-id').value = o.id || '';
+  document.getElementById('cek-modal-title').textContent = '✏️ Çek Düzenle';
+  document.getElementById('cek-firma').value = firma;
+  document.getElementById('cek-vade').value = o.vade || '';
+  document.getElementById('cek-tutar').value = o.tutar || '';
+  document.getElementById('cek-banka').value = o.banka || '';
+  document.getElementById('cek-no').value = o.cek_no || '';
+  var notVal = (o.not_ && o.not_ !== 'Çek') ? o.not_ : '';
+  document.getElementById('cek-not').value = notVal;
+  document.getElementById('cek-entity').value = o.entity || 'solariz';
+  openModal('cek-modal');
+}
+
 function saveCek() {
+  var editId = (document.getElementById('cek-edit-id').value || '').trim();
   var firma  = (document.getElementById('cek-firma').value || '').trim();
   var vade   = document.getElementById('cek-vade').value;
   var tutar  = parseFloat(document.getElementById('cek-tutar').value);
@@ -3907,7 +3931,11 @@ function saveCek() {
     kaydeden:     currentUser ? currentUser.ad : 'manuel'
   };
 
-  apiPost('/api/odemeler', payload);
+  if (editId) {
+    apiPut('/api/odemeler/' + editId, payload);
+  } else {
+    apiPost('/api/odemeler', payload);
+  }
   _cache.loaded = false;
   closeModal('cek-modal');
   refreshAll();
