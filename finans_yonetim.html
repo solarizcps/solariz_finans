@@ -2760,6 +2760,14 @@ function renderBorcOzeti() {
   // Yalnızca mevcut kredilere ait taksitler (sahipsiz/silinmiş kredi kalıntıları hariç)
   function taksitEslestir(odeme, tumKrediler) {
     if (odeme.tip !== 'taksit') return false;
+    // Yeni kayıtlar: kredi_id varsa — mevcut kredilerden biri mi?
+    if (odeme.kredi_id) {
+      for (var i = 0; i < tumKrediler.length; i++) {
+        if (tumKrediler[i].id === odeme.kredi_id) return true;
+      }
+      return false; // kredi_id var ama karşılığı yok → sahipsiz
+    }
+    // Eski kayıtlar (kredi_id=null): isim prefix eşleştirmesi
     var oAc = (odeme.aciklama || '').toLowerCase().trim();
     for (var i = 0; i < tumKrediler.length; i++) {
       var kAd = (tumKrediler[i].ad || '').toLowerCase().trim();
@@ -3103,6 +3111,9 @@ function renderKrediler() {
 
   function eslestir(kredi, odeme, tumKrediler) {
     if (odeme.tip !== 'taksit') return false;
+    // Yeni kayıtlar: kredi_id varsa doğrudan eşleştir
+    if (odeme.kredi_id) return odeme.kredi_id === kredi.id;
+    // Eski kayıtlar (kredi_id=null): isim prefix eşleştirmesi (backward compat)
     var oAc = (odeme.aciklama || '').toLowerCase().trim();
     var kAd = (kredi.ad || '').toLowerCase().trim();
     if (oAc.indexOf(kAd + ' ') !== 0) return false;
@@ -4268,6 +4279,7 @@ function saveKredi() {
     if (isNaN(basDate.getTime())) {
       alert('Taksit başlangıç tarihi geçersiz, taksitler oluşturulmadı.');
     } else {
+    var yeniKrediId = krediRes && krediRes.id ? krediRes.id : null;
     for (var t = 0; t < kalan_taksit; t++) {
       var tDate = new Date(basDate.getFullYear(), basDate.getMonth() + t, basDate.getDate());
       var tDateStr = tDate.getFullYear() + '-' + String(tDate.getMonth()+1).padStart(2,'0') + '-' + String(tDate.getDate()).padStart(2,'0');
@@ -4282,6 +4294,7 @@ function saveKredi() {
         durum: 'bekliyor',
         tekrar: 'tek',
         not: banka,
+        kredi_id: yeniKrediId,
         kaydeden: currentUser ? currentUser.ad : ''
       });
     }
@@ -4338,6 +4351,9 @@ function deleteKredi(id) {
     var kAd = (kredi.ad || '').toLowerCase().trim();
     var bagliTaksitler = data.odemeler.filter(function(o) {
       if (o.tip !== 'taksit') return false;
+      // Yeni kayıtlar: kredi_id varsa doğrudan eşleştir
+      if (o.kredi_id) return o.kredi_id === id;
+      // Eski kayıtlar: isim prefix
       var oAc = (o.aciklama || '').toLowerCase().trim();
       if (oAc.indexOf(kAd + ' ') !== 0) return false;
       // Daha spesifik başka bir kredi bu taksiti sahipleniyor mu?

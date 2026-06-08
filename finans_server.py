@@ -104,6 +104,14 @@ def init_db():
 
     c.execute("INSERT OR IGNORE INTO kullanicilar VALUES ('altan','104099','Altan','admin')")
     c.execute("INSERT OR IGNORE INTO kullanicilar VALUES ('adem','f7a6ua61','Adem','admin')")
+
+    # Migration: kredi_id alanı (mevcut DB'lerde yoksa ekle)
+    try:
+        c.execute("ALTER TABLE odemeler ADD COLUMN kredi_id TEXT")
+        print("[DB] odemeler.kredi_id sütunu eklendi")
+    except Exception:
+        pass  # Zaten varsa sessizce geç
+
     conn.commit()
     conn.close()
     print(f"[DB] Veritabanı hazır: {DB_PATH}")
@@ -263,13 +271,14 @@ def add_odeme():
     oid = d.get('id') or str(uuid.uuid4())[:10]
     conn = get_db()
     conn.execute('''INSERT OR REPLACE INTO odemeler
-        (id,entity,aciklama,tip,tutar,para,vade,odeme_tarihi,durum,tekrar,not_,kaydeden,kayit_tarihi,banka,cek_no)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (id,entity,aciklama,tip,tutar,para,vade,odeme_tarihi,durum,tekrar,not_,kaydeden,kayit_tarihi,banka,cek_no,kredi_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (oid, d.get('entity'), d.get('aciklama'), d.get('tip'), d.get('tutar',0),
          d.get('para','TL'), d.get('vade'), d.get('odeme_tarihi',''),
          d.get('durum','bekliyor'), d.get('tekrar','tek'),
          d.get('not',''), d.get('kaydeden'), datetime.now().isoformat(),
-         d.get('banka','') or None, d.get('cek_no','') or None))
+         d.get('banka','') or None, d.get('cek_no','') or None,
+         d.get('kredi_id') or None))
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'id': oid})
@@ -281,13 +290,14 @@ def update_odeme(oid):
     conn.execute('''UPDATE odemeler SET
         aciklama=?, tip=?, tutar=?, para=?, vade=?, odeme_tarihi=?,
         durum=?, tekrar=?, not_=?, guncelleyen=?, guncelleme=?,
-        banka=?, cek_no=?
+        banka=?, cek_no=?, kredi_id=COALESCE(?,kredi_id)
         WHERE id=?''',
         (d.get('aciklama'), d.get('tip'), d.get('tutar',0), d.get('para','TL'),
          d.get('vade'), d.get('odeme_tarihi',''), d.get('durum','bekliyor'),
          d.get('tekrar','tek'), d.get('not',''),
          d.get('guncelleyen'), datetime.now().isoformat(),
-         d.get('banka','') or None, d.get('cek_no','') or None, oid))
+         d.get('banka','') or None, d.get('cek_no','') or None,
+         d.get('kredi_id') or None, oid))
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
