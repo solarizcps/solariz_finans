@@ -1844,6 +1844,14 @@ function fmtCurrency(n, para = 'TL') {
   return (sym[para] || '₺') + fmt(n);
 }
 
+function toTL(o) {
+  var t = parseFloat(o.tutar || 0);
+  var p = o.para || 'TL';
+  if (p === 'TL') return t;
+  var k = _kurlar && _kurlar[p];
+  return (k > 0) ? t * k : t;
+}
+
 function parseDate(s) {
   if (!s) return null;
   var d = new Date(s);
@@ -1920,10 +1928,10 @@ function renderCekler() {
   var bekleyen  = cekler.filter(function(o){ return o.durum === 'bekliyor'; });
   var gecikti   = cekler.filter(function(o){ return o.durum === 'gecikti'; });
   var odenen    = cekler.filter(function(o){ return o.durum === 'odendi'; });
-  var topTutar  = cekler.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-  var bekTutar  = bekleyen.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-  var gecTutar  = gecikti.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-  var odTutar   = odenen.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
+  var topTutar  = cekler.reduce(function(s,o){return s+toTL(o);},0);
+  var bekTutar  = bekleyen.reduce(function(s,o){return s+toTL(o);},0);
+  var gecTutar  = gecikti.reduce(function(s,o){return s+toTL(o);},0);
+  var odTutar   = odenen.reduce(function(s,o){return s+toTL(o);},0);
 
   document.getElementById('cek-ozet').textContent = cekler.length + ' çek · ' + fmtCurrency(topTutar);
 
@@ -2001,7 +2009,7 @@ function renderCekler() {
         '<td style="padding:10px 16px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + notHtml + '</td>' +
         '<td style="padding:10px 16px;text-align:right;white-space:nowrap;">' +
           (o.durum!=='odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');_cache.loaded=false;renderCekler();">✓ Öde</button> ' : '') +
-          '<button class="btn btn-xs btn-outline" onclick="openCekEditModal(' + JSON.stringify(o).replace(/</g,'\\u003c') + ')">✏️</button>' +
+          '<button class="btn btn-xs btn-outline" onclick="openCekEditModalById(\'' + o.id + '\')">✏️</button>' +
         '</td>' +
       '</tr>';
     }).join('');
@@ -2578,11 +2586,11 @@ function renderSummaryCards() {
     return o.durum === 'odendi' && d && d >= monthStart && d <= monthEnd;
   });
 
-  document.getElementById('sum-month-due').textContent = fmtCurrency(monthDue.reduce((s,o)=>s+parseFloat(o.tutar||0),0));
+  document.getElementById('sum-month-due').textContent = fmtCurrency(monthDue.reduce((s,o)=>s+toTL(o),0));
   document.getElementById('sum-month-count').textContent = monthDue.length + ' ödeme';
-  document.getElementById('sum-overdue').textContent = fmtCurrency(overdue.reduce((s,o)=>s+parseFloat(o.tutar||0),0));
+  document.getElementById('sum-overdue').textContent = fmtCurrency(overdue.reduce((s,o)=>s+toTL(o),0));
   document.getElementById('sum-overdue-count').textContent = overdue.length + ' ödeme';
-  document.getElementById('sum-paid').textContent = fmtCurrency(paid.reduce((s,o)=>s+parseFloat(o.tutar||0),0));
+  document.getElementById('sum-paid').textContent = fmtCurrency(paid.reduce((s,o)=>s+toTL(o),0));
   document.getElementById('sum-paid-count').textContent = paid.length + ' ödeme';
 
   var totalCredit = krediler.reduce(function(s,k){return s+parseFloat(k.toplam||0);},0);
@@ -2805,10 +2813,10 @@ function renderOdemeler() {
   var ozKart = document.getElementById('odeme-ozet-kartlar');
   if (ozKart) {
     var ozOdemeler = tumOdemeler.filter(function(o){ return o.tip !== 'taksit'; });
-    var topTutar  = ozOdemeler.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-    var odTutar   = ozOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-    var bekTutar  = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-    var gecTutar  = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
+    var topTutar  = ozOdemeler.reduce(function(s,o){return s+toTL(o);},0);
+    var odTutar   = ozOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
+    var bekTutar  = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).reduce(function(s,o){return s+toTL(o);},0);
+    var gecTutar  = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).reduce(function(s,o){return s+toTL(o);},0);
     var odSay     = ozOdemeler.filter(function(o){return o.durum==='odendi';}).length;
     var bekSay    = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).length;
     var gecSay    = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).length;
@@ -3884,6 +3892,16 @@ function openCekModal() {
   document.getElementById('cek-not').value = '';
   document.getElementById('cek-entity').value = 'solariz';
   openModal('cek-modal');
+}
+
+function openCekEditModalById(id) {
+  var data = loadData();
+  var o = null;
+  for (var i = 0; i < data.odemeler.length; i++) {
+    if (data.odemeler[i].id === id) { o = data.odemeler[i]; break; }
+  }
+  if (!o) { alert('Çek bulunamadı'); return; }
+  openCekEditModal(o);
 }
 
 function openCekEditModal(o) {
