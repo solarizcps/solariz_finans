@@ -2757,9 +2757,25 @@ function renderBorcOzeti() {
   var satirlar = [];
 
   // --- 1) KREDİLER ---
-  // ödenen/kalan: odemeler.tip='taksit' kayıtlarından (gerçek durum)
-  // toplam: krediler tablosundaki beyan edilen toplam; yoksa ödenen+kalan
-  var taksitItems = odemeler.filter(function(o){ return o.tip === 'taksit'; });
+  // Yalnızca mevcut kredilere ait taksitler (sahipsiz/silinmiş kredi kalıntıları hariç)
+  function taksitEslestir(odeme, tumKrediler) {
+    if (odeme.tip !== 'taksit') return false;
+    var oAc = (odeme.aciklama || '').toLowerCase().trim();
+    for (var i = 0; i < tumKrediler.length; i++) {
+      var kAd = (tumKrediler[i].ad || '').toLowerCase().trim();
+      if (oAc.indexOf(kAd + ' ') !== 0) continue;
+      // Daha spesifik (daha uzun) başka bir kredi sahip mi?
+      var enUzun = kAd.length;
+      var sahipli = true;
+      for (var j = 0; j < tumKrediler.length; j++) {
+        var dAd = (tumKrediler[j].ad || '').toLowerCase().trim();
+        if (dAd !== kAd && oAc.indexOf(dAd + ' ') === 0 && dAd.length > enUzun) { sahipli = false; break; }
+      }
+      if (sahipli) return true;
+    }
+    return false;
+  }
+  var taksitItems = odemeler.filter(function(o){ return taksitEslestir(o, krediler); });
   var kOdenen = taksitItems.filter(function(o){ return o.durum === 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
   var kKalan  = taksitItems.filter(function(o){ return o.durum !== 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
   var kToplam = krediler.length
@@ -4309,7 +4325,31 @@ function editKredi(id) {
 }
 
 function deleteKredi(id) {
-  if (!confirm('Bu krediyi silmek istediğinize emin misiniz?')) return;
+  if (!confirm('Bu krediyi silmek istediğinize emin misiniz?\nBağlı taksit kayıtları da silinecektir.')) return;
+
+  // Cascade: bu krediye ait taksit ödemelerini de sil
+  var data = loadData();
+  var kredi = null;
+  for (var i = 0; i < data.krediler.length; i++) {
+    if (data.krediler[i].id === id) { kredi = data.krediler[i]; break; }
+  }
+  if (kredi) {
+    var digerKrediler = data.krediler.filter(function(k) { return k.id !== id; });
+    var kAd = (kredi.ad || '').toLowerCase().trim();
+    var bagliTaksitler = data.odemeler.filter(function(o) {
+      if (o.tip !== 'taksit') return false;
+      var oAc = (o.aciklama || '').toLowerCase().trim();
+      if (oAc.indexOf(kAd + ' ') !== 0) return false;
+      // Daha spesifik başka bir kredi bu taksiti sahipleniyor mu?
+      for (var j = 0; j < digerKrediler.length; j++) {
+        var dAd = (digerKrediler[j].ad || '').toLowerCase().trim();
+        if (oAc.indexOf(dAd + ' ') === 0 && dAd.length > kAd.length) return false;
+      }
+      return true;
+    });
+    bagliTaksitler.forEach(function(o) { apiDelete('/api/odemeler/' + o.id); });
+  }
+
   apiDelete('/api/krediler/' + id);
   _cache.loaded = false;
   refreshAll();
