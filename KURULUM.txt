@@ -1,0 +1,75 @@
+====================================================
+  FİNANS YÖNETİM SİSTEMİ — KURULUM KILAVUZU
+====================================================
+
+KLASÖR: \\solarizdb\Firma_Ozel\adem\solariz finans\
+        (D:\Firma_Ozel\adem\solariz finans\)
+
+DOSYALAR:
+  finans_server.py          -> Flask sunucu (port 5058)
+  finans_yonetim.html       -> Web arayüz
+  finans_import.py          -> Excel -> DB aktarim
+  finans_kur_ve_baslat.bat  -> Tek tikla kurulum
+  FinansServer_Task.xml     -> Task Scheduler sablonu
+  finans.db                 -> SQLite DB (otomatik olusur)
+
+====================================================
+ADIM 1 — DOSYALARI KOPYALA
+====================================================
+Tüm dosyaları su klasöre koy:
+  \\solarizdb\Firma_Ozel\adem\solariz finans\
+
+====================================================
+ADIM 2 — EXCEL VERİSİNİ AKTAR
+====================================================
+a) Genel_Durum_20_02_2026.xlsx dosyasini
+   ayni klasöre koy
+
+b) SolarizDb sunucusunda (192.168.1.16) calistir:
+   python "D:\Firma_Ozel\adem\solariz finans\finans_import.py"
+
+c) "AKTARIM TAMAMLANDI" mesajini bekle
+
+====================================================
+ADIM 3 — SUNUCUYU KUR VE BAŞLAT
+====================================================
+SolarizDb sunucusunda Administrator olarak calistir:
+  finans_kur_ve_baslat.bat
+
+Bu bat dosyasi otomatik olarak:
+  - Flask paketini kontrol eder / yukler
+  - Task Scheduler'a gorev ekler
+  - Sunucuyu hemen baslatir
+  - Sunucu her boot'ta otomatik baslar
+
+====================================================
+ADIM 4 — HTML'İ VERİTABANINA BAĞLA
+====================================================
+finans_yonetim.html icinde su satiri bul ve degistir:
+
+  var API_BASE = '';
+  DEGISTIR:
+  var API_BASE = 'http://192.168.1.16:5058';
+
+====================================================
+ERİŞİM
+====================================================
+Agdaki herhangi bir cihazdan (PC/tablet/telefon):
+  http://192.168.1.16:5058
+
+====================================================
+KULLANICILAR
+====================================================
+  altan / 104099    (admin)
+  adem  / f7a6ua61  (admin)
+
+====================================================
+DİĞER ÇALIŞAN SERVİSLER (DOKUNMA!)
+====================================================
+  5055 -> D:\Ortak\Solariz-ARGE\server.py
+  5056 -> D:\Firma_Ozel\adem\korgun_server_yeni.py
+  5057 -> D:\Firma_Ozel\adem\planlama cps sistemi\planlama_server.py
+  PDKS -> C:\PDKS\server.py
+
+  Finans 5058 bunlardan BAGIMSIZ calisir, diger servislere dokunmaz.
+====================================================
