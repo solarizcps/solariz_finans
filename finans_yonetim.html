@@ -3233,8 +3233,8 @@ function renderKrediler() {
       '</tr>';
     }).join('');
 
-    var takTabloHTML = ilgili.length > 0 ?
-      '<div id="tak_' + k.id + '" style="display:none;">' +
+    var takTabloHTML = '<div id="tak_' + k.id + '" style="display:none;">' +
+      (ilgili.length > 0 ?
         '<table style="width:100%;border-collapse:collapse;background:#fff;">' +
           '<thead><tr style="background:#f8f9fc;border-bottom:2px solid #e8eaf0;">' +
             '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">No</th>' +
@@ -3252,28 +3252,39 @@ function renderKrediler() {
             '<td style="padding:10px 16px;font-size:12px;font-weight:700;color:#16a34a;">Ödenen: ' + fmtCurrency(odenenTutar) + '</td>' +
             '<td colspan="2" style="padding:10px 16px;font-size:12px;font-weight:700;color:#ea580c;">Kalan: ' + fmtCurrency(kalanTutar) + '</td>' +
           '</tr></tfoot>' +
-        '</table>' +
-      '</div>' : '';
+        '</table>'
+        :
+        '<div style="padding:14px 18px;color:var(--muted);font-size:13px;background:#fafbfc;border-top:1px solid #f1f5f9;">' +
+          '📋 Bu kredi için taksit kaydı bulunamadı. ' +
+          '<span style="font-size:11px;">Otomatik taksit oluşturmak için ✏ düzenle butonunu kullanın.</span>' +
+        '</div>'
+      ) +
+    '</div>';
 
     return '<div class="panel" style="margin-bottom:10px;">' +
       // HEADER — tıklanabilir
-      '<div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;border-bottom:' + (ilgili.length?'1px solid #e8eaf0':'none') + ';" onclick="toggleTaksit(\'' + k.id + '\')">' +
+      '<div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;border-bottom:1px solid #e8eaf0;" onclick="toggleTaksit(\'' + k.id + '\')">' +
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
           '<span style="font-size:14px;font-weight:700;color:#1a1d2e;">' + k.ad + '</span>' +
           '<span style="font-size:11px;background:#f1f5f9;color:#6b7280;padding:2px 8px;border-radius:10px;font-weight:600;">' + (k.banka||'—') + '</span>' +
           '<span style="font-size:12px;font-weight:700;color:' + tamRenk + ';">' + tamYazi + '</span>' +
         '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation();">' +
-          // Toplam / Ödenen / Kalan özet
-          '<span style="font-size:11px;color:#6b7280;">Toplam: <strong>' + fmtCurrency(total) + '</strong></span>' +
-          '<span style="color:#d0d4e0;">|</span>' +
-          '<span style="font-size:11px;color:#16a34a;">Ödenen: <strong>' + fmtCurrency(odenenTutar) + '</strong></span>' +
-          '<span style="color:#d0d4e0;">|</span>' +
-          '<span style="font-size:11px;color:#ea580c;">Kalan: <strong>' + fmtCurrency(kalanTutar) + '</strong></span>' +
-          '<span style="color:#d0d4e0;margin:0 4px;">|</span>' +
-          '<button class="btn btn-xs btn-outline" onclick="editKredi(\'' + k.id + '\')">✏</button>' +
-          '<button class="btn btn-xs btn-danger" onclick="deleteKredi(\'' + k.id + '\')">✕</button>' +
-          (ilgili.length ? '<span id="takico_' + k.id + '" style="font-size:16px;color:#6b7280;margin-left:4px;">▼</span>' : '') +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<div style="display:flex;align-items:center;gap:6px;" onclick="event.stopPropagation();">' +
+            // Toplam / Ödenen / Kalan özet
+            '<span style="font-size:11px;color:#6b7280;">Toplam: <strong>' + fmtCurrency(total) + '</strong></span>' +
+            '<span style="color:#d0d4e0;">|</span>' +
+            '<span style="font-size:11px;color:#16a34a;">Ödenen: <strong>' + fmtCurrency(odenenTutar) + '</strong></span>' +
+            '<span style="color:#d0d4e0;">|</span>' +
+            '<span style="font-size:11px;color:#ea580c;">Kalan: <strong>' + fmtCurrency(kalanTutar) + '</strong></span>' +
+            '<span style="color:#d0d4e0;margin:0 4px;">|</span>' +
+            '<button class="btn btn-xs btn-outline" onclick="editKredi(\'' + k.id + '\')">✏</button>' +
+            '<button class="btn btn-xs btn-danger" onclick="deleteKredi(\'' + k.id + '\')">✕</button>' +
+          '</div>' +
+          // ▼ ikonu stopPropagation DIŞINDA — kendi onclick'i ile doğrudan toggle
+          '<span id="takico_' + k.id + '" onclick="event.stopPropagation();toggleTaksit(\'' + k.id + '\')" ' +
+            'style="font-size:16px;color:#6b7280;margin-left:6px;cursor:pointer;user-select:none;padding:2px 6px;border-radius:4px;" ' +
+            'title="Taksitleri göster/gizle">▼</span>' +
         '</div>' +
       '</div>' +
       // PROGRESS BAR
