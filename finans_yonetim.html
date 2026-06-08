@@ -1920,7 +1920,11 @@ function toTL(o) {
   var p = o.para || 'TL';
   if (p === 'TL') return t;
   var k = _kurlar && _kurlar[p];
-  return (k > 0) ? t * k : t;
+  if (!(k > 0)) {
+    console.warn('[FINANS] toTL: kur yüklenmedi para=' + p + ' tutar=' + t + ' — hesaba 0 eklendi');
+    return 0;
+  }
+  return t * k;
 }
 
 function parseDate(s) {
@@ -1972,6 +1976,7 @@ function refreshAll() {
   loadKurlar();
   renderAlerts();
   renderSummaryCards();
+  renderBorcOzeti();
   renderUpcoming();
   renderCreditSummary();
   renderMonthlyChart();
@@ -2720,6 +2725,58 @@ function renderSummaryCards() {
       '<div style="height:6px;width:' + genelPct + '%;background:linear-gradient(90deg,#16a34a,#34d399);border-radius:3px;"></div></div>' +
       '<div style="font-size:11px;color:var(--muted);margin-top:2px;">%' + genelPct + ' ödendi</div>';
   }
+}
+
+// ============================================================
+// BORÇ ÖZETİ TABLO
+// ============================================================
+
+function renderBorcOzeti() {
+  var tbody = document.getElementById('oz-borc-satirlar');
+  if (!tbody) return;
+  var _tmp_ = entityData();
+  var odemeler = _tmp_.odemeler;
+
+  var kategoriler = [
+    { label: '🏦 Kredi Taksitleri', renk: '#2563eb', filtre: function(o){ return o.tip === 'taksit'; } },
+    { label: '🏦 Krediler',         renk: '#2563eb', filtre: function(o){ return o.tip === 'kredi'; } },
+    { label: '📄 Çekler',           renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('Çek:') === 0; } },
+    { label: '🤝 Cari/Tedarikçi',  renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && !(o.aciklama && o.aciklama.indexOf('Çek:') === 0); } },
+    { label: '💳 Kredi Kartı',      renk: '#db2877', filtre: function(o){ return o.tip === 'kredi-karti'; } },
+    { label: '🏠 Kira',             renk: '#0891b2', filtre: function(o){ return o.tip === 'kira'; } },
+    { label: '⚡ Fatura',           renk: '#ea580c', filtre: function(o){ return o.tip === 'fatura'; } },
+    { label: '👤 Maaş',             renk: '#0891b2', filtre: function(o){ return o.tip === 'maas'; } },
+    { label: '🧾 Vergi',            renk: '#ea580c', filtre: function(o){ return o.tip === 'vergi'; } },
+    { label: '📌 Diğer',            renk: '#6b7280', filtre: function(o){ return o.tip === 'diger'; } },
+  ];
+
+  var satirlar = kategoriler.map(function(kat) {
+    var items = odemeler.filter(kat.filtre);
+    if (!items.length) return '';
+    var toplam = items.reduce(function(s,o){ return s + toTL(o); }, 0);
+    var odenen = items.filter(function(o){ return o.durum === 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
+    var kalan  = toplam - odenen;
+    var pct    = toplam > 0 ? Math.min(100, Math.round((odenen / toplam) * 100)) : 0;
+    return '<tr style="border-bottom:1px solid #f1f5f9;">' +
+      '<td style="padding:10px 18px;font-weight:600;">' + kat.label + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;font-weight:600;">' + fmtCurrency(toplam) + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#16a34a;font-weight:600;">' + fmtCurrency(odenen) + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#dc2626;font-weight:600;">' + fmtCurrency(kalan) + '</td>' +
+      '<td style="padding:10px 18px;">' +
+        '<div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;">' +
+          '<div style="height:6px;width:' + pct + '%;background:' + kat.renk + ';border-radius:3px;"></div>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:2px;">%' + pct + ' ödendi · ' + items.length + ' kayıt</div>' +
+      '</td>' +
+    '</tr>';
+  }).filter(Boolean).join('');
+
+  tbody.innerHTML = satirlar ||
+    '<tr><td colspan="5" style="padding:16px 18px;color:var(--muted);text-align:center;">Henüz kayıt yok</td></tr>';
+
+  // Tablo güncelleme zamanı
+  var tsEl = document.getElementById('oz-tablo-guncelle');
+  if (tsEl) tsEl.textContent = 'Son güncelleme: ' + new Date().toLocaleTimeString('tr-TR');
 }
 
 // ============================================================
@@ -3556,14 +3613,18 @@ function renderKasa() {
     var bakiye = res.bakiye || 0;
     var hareketler = res.hareketler || [];
 
+    // Tüm hareketleri toTL ile TL karşılığına çevirerek frontend bakiye hesapla
+    // (sunucu bakiyesi AND para='TL' ile sadece TL hareketleri toplar)
+    var giris = hareketler.filter(function(h){ return h.tip==='giris'; }).reduce(function(s,h){ return s+toTL(h); },0);
+    var cikis = hareketler.filter(function(h){ return h.tip==='cikis'; }).reduce(function(s,h){ return s+toTL(h); },0);
+    var bakiyeHesap = giris - cikis;
+
     // Header bakiye güncelle
     var tlEl = document.getElementById('kasa-tl-toplam');
     var hEl  = document.getElementById('kasa-bakiye-header');
-    if (tlEl) tlEl.textContent = fmtCurrency(bakiye);
-    if (hEl)  hEl.textContent  = '🏦 ' + fmtCurrency(bakiye);
+    if (tlEl) tlEl.textContent = fmtCurrency(bakiyeHesap);
+    if (hEl)  hEl.textContent  = '🏦 ' + fmtCurrency(bakiyeHesap);
 
-    var giris = hareketler.filter(function(h){ return h.tip==='giris'; }).reduce(function(s,h){ return s+parseFloat(h.tutar||0); },0);
-    var cikis = hareketler.filter(function(h){ return h.tip==='cikis'; }).reduce(function(s,h){ return s+parseFloat(h.tutar||0); },0);
     var ozEl = document.getElementById('kasa-hareket-ozet');
     if (ozEl) ozEl.textContent = 'Giriş: ' + fmtCurrency(giris) + ' · Çıkış: ' + fmtCurrency(cikis);
 
