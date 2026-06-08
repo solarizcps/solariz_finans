@@ -4280,8 +4280,14 @@ function saveKredi() {
       alert('Taksit başlangıç tarihi geçersiz, taksitler oluşturulmadı.');
     } else {
     var yeniKrediId = krediRes && krediRes.id ? krediRes.id : null;
+    // Ay sonu güvenli tarih hesabı: min(başlangıç günü, hedef ayın son günü)
+    function addAy(base, n) {
+      var ay = base.getMonth() + n;
+      var sonGun = new Date(base.getFullYear(), ay + 1, 0).getDate();
+      return new Date(base.getFullYear(), ay, Math.min(base.getDate(), sonGun));
+    }
     for (var t = 0; t < kalan_taksit; t++) {
-      var tDate = new Date(basDate.getFullYear(), basDate.getMonth() + t, basDate.getDate());
+      var tDate = addAy(basDate, t);
       var tDateStr = tDate.getFullYear() + '-' + String(tDate.getMonth()+1).padStart(2,'0') + '-' + String(tDate.getDate()).padStart(2,'0');
       apiPost('/api/odemeler', {
         entity: currentEntity,
