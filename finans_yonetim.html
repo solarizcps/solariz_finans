@@ -2939,19 +2939,21 @@ function renderOdemeler() {
     var odTutar   = ozOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
     var bekTutar  = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).reduce(function(s,o){return s+toTL(o);},0);
     var gecTutar  = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).reduce(function(s,o){return s+toTL(o);},0);
+    var kalanBorc = bekTutar + gecTutar;
     var odSay     = ozOdemeler.filter(function(o){return o.durum==='odendi';}).length;
     var bekSay    = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).length;
     var gecSay    = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).length;
-    var pct       = topTutar > 0 ? Math.round((odTutar/topTutar)*100) : 0;
+    var pct       = (odTutar + kalanBorc) > 0 ? Math.round((odTutar / (odTutar + kalanBorc)) * 100) : 0;
 
     ozKart.innerHTML =
       '<div class="card" style="--accent-color:#1a1d2e;">' +
-        '<div class="card-label">Toplam Ödeme</div>' +
-        '<div class="card-value" style="font-size:20px;">' + fmtCurrency(topTutar) + '</div>' +
-        '<div class="card-sub">' + ozOdemeler.length + ' kayıt · %' + pct + ' ödendi</div>' +
-        '<div style="height:5px;background:#f1f5f9;border-radius:3px;margin-top:8px;overflow:hidden;">' +
+        '<div class="card-label">Kalan Borç</div>' +
+        '<div class="card-value" style="font-size:20px;color:var(--red);">' + fmtCurrency(kalanBorc) + '</div>' +
+        '<div class="card-sub">' + (bekSay + gecSay) + ' ödeme bekliyor · %' + pct + ' ödendi</div>' +
+        '<div style="height:5px;background:#f1f5f9;border-radius:3px;margin-top:6px;overflow:hidden;">' +
           '<div style="height:5px;width:' + pct + '%;background:linear-gradient(90deg,#16a34a,#34d399);border-radius:3px;"></div>' +
         '</div>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:4px;">Toplam taahhüt: ' + fmtCurrency(topTutar) + ' · ' + ozOdemeler.length + ' kayıt</div>' +
       '</div>' +
       '<div class="card" style="--accent-color:var(--c-green);">' +
         '<div class="card-label">Ödenen</div>' +
