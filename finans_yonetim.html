@@ -2736,10 +2736,38 @@ function renderBorcOzeti() {
   if (!tbody) return;
   var _tmp_ = entityData();
   var odemeler = _tmp_.odemeler;
+  var krediler  = _tmp_.krediler;
 
-  var kategoriler = [
-    { label: '🏦 Krediler',         renk: '#2563eb', filtre: function(o){ return o.tip === 'kredi'; } },
-    { label: '📄 Çekler',           renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('Çek:') === 0; } },
+  // Satır HTML oluşturucu
+  function satirHtml(label, renk, kalan, odenen, toplam, adet, pct) {
+    return '<tr style="border-bottom:1px solid #f1f5f9;">' +
+      '<td style="padding:10px 18px;font-weight:600;">' + label + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#dc2626;font-weight:700;font-size:15px;">' + fmtCurrency(kalan) + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#16a34a;font-weight:600;">' + fmtCurrency(odened) + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#9ca3af;font-size:12px;">' + fmtCurrency(toplam) + '</td>' +
+      '<td style="padding:10px 18px;">' +
+        '<div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;">' +
+          '<div style="height:6px;width:' + pct + '%;background:' + renk + ';border-radius:3px;"></div>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:2px;">%' + pct + ' ödendi · ' + adet + ' kayıt</div>' +
+      '</td>' +
+    '</tr>';
+  }
+
+  var satirlar = [];
+
+  // --- 1) KREDİLER — krediler tablosundan (taksit kayıtlarına bağlı değil) ---
+  if (krediler.length) {
+    var kToplam  = krediler.reduce(function(s,k){ return s + parseFloat(k.toplam||0); }, 0);
+    var kKalan   = krediler.reduce(function(s,k){ return s + parseFloat(k.kalan_taksit||0) * parseFloat(k.taksit||0); }, 0);
+    var kOdenen  = kToplam - kKalan;
+    var kPct     = kToplam > 0 ? Math.min(100, Math.round((kOdenen / kToplam) * 100)) : 0;
+    satirlar.push(satirHtml('🏦 Krediler', '#2563eb', kKalan, kOdenen, kToplam, krediler.length, kPct));
+  }
+
+  // --- 2) ÖDEMELER kaynaklı kategoriler — durum filtresiyle doğrudan kalan ---
+  var odemeKat = [
+    { label: '📄 Çekler',          renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('Çek:') === 0; } },
     { label: '🤝 Cari/Tedarikçi',  renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && !(o.aciklama && o.aciklama.indexOf('Çek:') === 0); } },
     { label: '💳 Kredi Kartı',      renk: '#db2877', filtre: function(o){ return o.tip === 'kredi-karti'; } },
     { label: '🏠 Kira',             renk: '#0891b2', filtre: function(o){ return o.tip === 'kira'; } },
@@ -2749,31 +2777,19 @@ function renderBorcOzeti() {
     { label: '📌 Diğer',            renk: '#6b7280', filtre: function(o){ return o.tip === 'diger'; } },
   ];
 
-  var satirlar = kategoriler.map(function(kat) {
-    var items = odemeler.filter(kat.filtre);
-    if (!items.length) return '';
+  odemeKat.forEach(function(kat) {
+    var items  = odemeler.filter(kat.filtre);
+    if (!items.length) return;
     var toplam = items.reduce(function(s,o){ return s + toTL(o); }, 0);
-    var odenen = items.filter(function(o){ return o.durum === 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
-    var kalan  = toplam - odenen;
-    var pct    = toplam > 0 ? Math.min(100, Math.round((odenen / toplam) * 100)) : 0;
-    return '<tr style="border-bottom:1px solid #f1f5f9;">' +
-      '<td style="padding:10px 18px;font-weight:600;">' + kat.label + '</td>' +
-      '<td style="padding:10px 18px;text-align:right;color:#dc2626;font-weight:700;font-size:15px;">' + fmtCurrency(kalan) + '</td>' +
-      '<td style="padding:10px 18px;text-align:right;color:#16a34a;font-weight:600;">' + fmtCurrency(odenen) + '</td>' +
-      '<td style="padding:10px 18px;text-align:right;color:#9ca3af;font-size:12px;">' + fmtCurrency(toplam) + '</td>' +
-      '<td style="padding:10px 18px;">' +
-        '<div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;">' +
-          '<div style="height:6px;width:' + pct + '%;background:' + kat.renk + ';border-radius:3px;"></div>' +
-        '</div>' +
-        '<div style="font-size:10px;color:var(--muted);margin-top:2px;">%' + pct + ' ödendi · ' + items.length + ' kayıt</div>' +
-      '</td>' +
-    '</tr>';
-  }).filter(Boolean).join('');
+    var odened = items.filter(function(o){ return o.durum === 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
+    var kalan  = items.filter(function(o){ return o.durum !== 'odendi'; }).reduce(function(s,o){ return s + toTL(o); }, 0);
+    var pct    = toplam > 0 ? Math.min(100, Math.round((odened / toplam) * 100)) : 0;
+    satirlar.push(satirHtml(kat.label, kat.renk, kalan, odened, toplam, items.length, pct));
+  });
 
-  tbody.innerHTML = satirlar ||
+  tbody.innerHTML = satirlar.join('') ||
     '<tr><td colspan="5" style="padding:16px 18px;color:var(--muted);text-align:center;">Henüz kayıt yok</td></tr>';
 
-  // Tablo güncelleme zamanı
   var tsEl = document.getElementById('oz-tablo-guncelle');
   if (tsEl) tsEl.textContent = 'Son güncelleme: ' + new Date().toLocaleTimeString('tr-TR');
 }
