@@ -763,9 +763,9 @@ body {
       <thead>
         <tr style="background:#f8f9fc;">
           <th style="padding:10px 18px;text-align:left;font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Kategori</th>
-          <th style="padding:10px 18px;text-align:right;font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Toplam</th>
+          <th style="padding:10px 18px;text-align:right;font-size:11px;color:#dc2626;font-weight:700;text-transform:uppercase;">Kalan Borç</th>
           <th style="padding:10px 18px;text-align:right;font-size:11px;color:#16a34a;font-weight:700;text-transform:uppercase;">Ödenen</th>
-          <th style="padding:10px 18px;text-align:right;font-size:11px;color:#dc2626;font-weight:700;text-transform:uppercase;">Kalan</th>
+          <th style="padding:10px 18px;text-align:right;font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Toplam Taahhüt</th>
           <th style="padding:10px 18px;text-align:right;font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Durum</th>
         </tr>
       </thead>
@@ -773,9 +773,9 @@ body {
       <tfoot>
         <tr style="background:#fef9c3;border-top:2px solid #e8eaf0;" id="oz-borc-toplam">
           <td style="padding:12px 18px;font-weight:800;font-size:14px;">GENEL TOPLAM</td>
-          <td style="padding:12px 18px;text-align:right;font-weight:800;font-size:14px;" id="oz-gt-toplam">₺0</td>
+          <td style="padding:12px 18px;text-align:right;font-weight:800;font-size:16px;color:#dc2626;" id="oz-gt-kalan">₺0</td>
           <td style="padding:12px 18px;text-align:right;font-weight:800;font-size:14px;color:#16a34a;" id="oz-gt-odenen">₺0</td>
-          <td style="padding:12px 18px;text-align:right;font-weight:800;font-size:14px;color:#dc2626;" id="oz-gt-kalan">₺0</td>
+          <td style="padding:12px 18px;text-align:right;font-weight:700;font-size:12px;color:#6b7280;" id="oz-gt-toplam">₺0</td>
           <td style="padding:12px 18px;text-align:right;" id="oz-gt-bar"></td>
         </tr>
       </tfoot>
@@ -2738,7 +2738,6 @@ function renderBorcOzeti() {
   var odemeler = _tmp_.odemeler;
 
   var kategoriler = [
-    { label: '🏦 Kredi Taksitleri', renk: '#2563eb', filtre: function(o){ return o.tip === 'taksit'; } },
     { label: '🏦 Krediler',         renk: '#2563eb', filtre: function(o){ return o.tip === 'kredi'; } },
     { label: '📄 Çekler',           renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('Çek:') === 0; } },
     { label: '🤝 Cari/Tedarikçi',  renk: '#7c3aed', filtre: function(o){ return o.tip === 'tedarikci' && !(o.aciklama && o.aciklama.indexOf('Çek:') === 0); } },
@@ -2759,9 +2758,9 @@ function renderBorcOzeti() {
     var pct    = toplam > 0 ? Math.min(100, Math.round((odenen / toplam) * 100)) : 0;
     return '<tr style="border-bottom:1px solid #f1f5f9;">' +
       '<td style="padding:10px 18px;font-weight:600;">' + kat.label + '</td>' +
-      '<td style="padding:10px 18px;text-align:right;font-weight:600;">' + fmtCurrency(toplam) + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#dc2626;font-weight:700;font-size:15px;">' + fmtCurrency(kalan) + '</td>' +
       '<td style="padding:10px 18px;text-align:right;color:#16a34a;font-weight:600;">' + fmtCurrency(odenen) + '</td>' +
-      '<td style="padding:10px 18px;text-align:right;color:#dc2626;font-weight:600;">' + fmtCurrency(kalan) + '</td>' +
+      '<td style="padding:10px 18px;text-align:right;color:#9ca3af;font-size:12px;">' + fmtCurrency(toplam) + '</td>' +
       '<td style="padding:10px 18px;">' +
         '<div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;">' +
           '<div style="height:6px;width:' + pct + '%;background:' + kat.renk + ';border-radius:3px;"></div>' +
