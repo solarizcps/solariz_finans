@@ -1430,7 +1430,7 @@ body {
 <div class="modal-overlay" id="kredi-modal">
   <div class="modal" style="width:580px;">
     <div class="modal-header">
-      <span class="modal-title">🏦 Kredi / Taksit Ekle</span>
+      <span class="modal-title" id="kredi-modal-title">🏦 Kredi / Taksit Ekle</span>
       <button class="modal-close" onclick="closeModal('kredi-modal')">✕</button>
     </div>
     <div class="modal-body">
@@ -4058,7 +4058,16 @@ function saveKredi() {
   var para         = document.getElementById('kredi-para') ? document.getElementById('kredi-para').value : 'TL';
   var otomatik     = document.getElementById('kredi-otomatik-taksit') ? document.getElementById('kredi-otomatik-taksit').checked : false;
 
-  if (!ad || !toplam) return alert('Banka, kredi adı ve toplam borç zorunludur');
+  if (!ad || !toplam) return alert('Kredi adı ve toplam borç zorunludur');
+
+  // Otomatik taksit seçiliyse başlangıç tarihi gerekli ve geçerli olmalı
+  if (otomatik && !id) {
+    if (!baslangic) return alert('Otomatik taksit için ilk taksit tarihi girilmelidir');
+    var testDate = new Date(baslangic);
+    if (isNaN(testDate.getTime())) return alert('Geçersiz taksit başlangıç tarihi. Lütfen tarihi düzeltin');
+    if (!(taksit > 0)) return alert('Otomatik taksit için aylık taksit tutarı girilmelidir');
+    if (!(kalan_taksit > 0)) return alert('Otomatik taksit için taksit sayısı girilmelidir');
+  }
 
   var payload = { entity: currentEntity, ad: ad, tip: tip, toplam: toplam, taksit: taksit||0,
     kalan_taksit: kalan_taksit||0, gun: gun, faiz: faiz, banka: banka, baslangic: baslangic,
@@ -4075,6 +4084,9 @@ function saveKredi() {
   // Otomatik taksit oluşturma
   if (otomatik && !id && taksit > 0 && kalan_taksit > 0 && baslangic) {
     var basDate = new Date(baslangic);
+    if (isNaN(basDate.getTime())) {
+      alert('Taksit başlangıç tarihi geçersiz, taksitler oluşturulmadı.');
+    } else {
     for (var t = 0; t < kalan_taksit; t++) {
       var tDate = new Date(basDate.getFullYear(), basDate.getMonth() + t, basDate.getDate());
       var tDateStr = tDate.getFullYear() + '-' + String(tDate.getMonth()+1).padStart(2,'0') + '-' + String(tDate.getDate()).padStart(2,'0');
@@ -4093,6 +4105,7 @@ function saveKredi() {
       });
     }
     alert(kalan_taksit + ' adet taksit ödeme kaydı oluşturuldu!');
+    }
   }
 
   _cache.loaded = false;
@@ -4111,7 +4124,13 @@ function editKredi(id) {
   document.getElementById('kredi-tip').value = k.tip || 'kobi';
   document.getElementById('kredi-toplam').value = k.toplam || '';
   document.getElementById('kredi-taksit').value = k.taksit || '';
-  document.getElementById('kredi-kalan-taksit').value = k.kalan_taksit || '';
+  // Gerçek bekleyen taksit sayısını odemeler'den hesapla; yoksa statik değeri kullan
+  var kAdLower = (k.ad || '').toLowerCase().trim();
+  var kalanGercek = kAdLower ? data.odemeler.filter(function(o) {
+    return o.tip === 'taksit' && o.durum !== 'odendi' &&
+      (o.aciklama || '').toLowerCase().indexOf(kAdLower + ' ') === 0;
+  }).length : 0;
+  document.getElementById('kredi-kalan-taksit').value = kalanGercek > 0 ? kalanGercek : (k.kalan_taksit || '');
   document.getElementById('kredi-gun').value = k.gun || '';
   document.getElementById('kredi-faiz').value = k.faiz || '';
   document.getElementById('kredi-banka').value = k.banka || '';
@@ -4119,6 +4138,8 @@ function editKredi(id) {
   document.getElementById('kredi-not').value = k.not_ || k.not || '';
   if (document.getElementById('kredi-para')) document.getElementById('kredi-para').value = k.para || 'TL';
   if (document.getElementById('kredi-otomatik-taksit')) document.getElementById('kredi-otomatik-taksit').checked = false;
+  var titleEl = document.getElementById('kredi-modal-title');
+  if (titleEl) titleEl.textContent = '✏️ Kredi Düzenle';
   openModal('kredi-modal');
 }
 
@@ -4198,6 +4219,8 @@ function clearKrediForm() {
   if (otEl) otEl.checked = false;
   var bilgi = document.getElementById('kredi-hesap-bilgi');
   if (bilgi) bilgi.style.display = 'none';
+  var titleEl = document.getElementById('kredi-modal-title');
+  if (titleEl) titleEl.textContent = '🏦 Kredi / Taksit Ekle';
 }
 
 // ============================================================
