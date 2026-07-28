@@ -892,7 +892,7 @@ body {
         <option value="EUR">€ Euro</option>
         <option value="XAU">🥇 Altın</option>
       </select>
-      <select class="form-control" style="width:160px;" id="filter-donem" onchange="renderOdemeler()">
+      <select class="form-control" style="width:160px;" id="filter-donem" onchange="renderOdemeler()" title="Ay Sonuna Kadar: yalnızca bu ay vadesi dolan ödemeler">
         <option value="ay-sonu">Ay Sonuna Kadar</option>
         <option value="tumu">Tümü</option>
       </select>
@@ -3378,6 +3378,28 @@ function odemeDonemEslesir(o, donem) {
   return true;
 }
 
+function odemeListeFiltreYeniKayit(vade, entity) {
+  var uyarilar = [];
+  var vStr = normalizeVadeStr(vade);
+  var sel = document.getElementById('filter-donem');
+  if (sel && vStr) {
+    populateOdemeDonemSelect(entityData().odemeler);
+    var aySonu = vadeAySonuYMD();
+    if (sel.value === 'ay-sonu' && vStr > aySonu) {
+      var ayKey = vStr.substring(0, 7);
+      sel.value = sel.querySelector('option[value="' + ayKey + '"]') ? ayKey : 'tumu';
+      _odDonemFiltre = sel.value;
+      uyarilar.push('Vade gelecek ay — dönem filtresi otomatik güncellendi.');
+    }
+  }
+  var ef = getActiveEntityFilter();
+  var firmaAd = { solariz: 'Solariz', nexgen: 'NexGen', pera: 'Pera AŞ', sahsi: 'Şahsi' };
+  if (ef && entity && ef !== entity) {
+    uyarilar.push('Kayıt ' + (firmaAd[entity] || entity) + ' firmasında — üstte "' + (firmaAd[ef] || ef) + '" filtresi seçili.');
+  }
+  return uyarilar;
+}
+
 function odemeDonemSecenekleri(odemeler) {
   var aylar = {};
   odemeler.forEach(function(o) {
@@ -5036,9 +5058,12 @@ function saveOdeme() {
     apiPost('/api/odemeler', payload);
   }
   _cache.loaded = false;
+  reloadCache();
+  var uyarilar = odemeListeFiltreYeniKayit(vade, odemeEntity);
   closeModal('odeme-modal');
   clearOdemeForm();
   refreshAll();
+  if (uyarilar.length) alert('✓ Ödeme kaydedildi.\n' + uyarilar.join('\n'));
 }
 
 function editOdeme(id) {
@@ -5511,7 +5536,8 @@ function openKrediKartModal() {
   document.getElementById('kk-para').value = 'TL';
   document.getElementById('kk-asgari').value = '';
   document.getElementById('kk-vade').value = '';
-  document.getElementById('kk-entity').value = 'solariz';
+  var ef = getActiveEntityFilter();
+  document.getElementById('kk-entity').value = ef || currentEntity || 'solariz';
   document.getElementById('kk-neicin').value = '';
   document.getElementById('kk-not').value = '';
   openModal('kredi-karti-modal');
@@ -5520,9 +5546,9 @@ function openKrediKartModal() {
 function saveKrediKart() {
   var aciklama = (document.getElementById('kk-aciklama').value || '').trim();
   var banka    = (document.getElementById('kk-banka').value || '').trim();
-  var tutar    = parseFloat(document.getElementById('kk-tutar').value);
+  var tutar    = parseMoney(document.getElementById('kk-tutar').value);
   var para     = document.getElementById('kk-para').value || 'TL';
-  var asgari   = parseFloat(document.getElementById('kk-asgari').value) || 0;
+  var asgari   = parseMoney(document.getElementById('kk-asgari').value);
   var vade     = document.getElementById('kk-vade').value;
   var entity   = document.getElementById('kk-entity').value || 'solariz';
   var neicin   = (document.getElementById('kk-neicin').value || '').trim();
@@ -5538,7 +5564,7 @@ function saveKrediKart() {
   if (notEk)      notParts.push(notEk);
   var notStr = notParts.join(' | ');
 
-  apiPost('/api/odemeler', {
+  var res = apiPost('/api/odemeler', {
     entity:       entity,
     aciklama:     aciklama,
     tip:          'kredi-karti',
@@ -5553,9 +5579,19 @@ function saveKrediKart() {
     kaydeden:     currentUser ? currentUser.ad : 'manuel'
   });
 
+  if (!res || !res.ok) {
+    alert('Kredi kartı kaydedilemedi. Lütfen tekrar deneyin.');
+    return;
+  }
+
   _cache.loaded = false;
+  reloadCache();
+  var uyarilar = odemeListeFiltreYeniKayit(vade, entity);
   closeModal('kredi-karti-modal');
   refreshAll();
+  var mesaj = '✓ Kredi kartı eklendi.';
+  if (uyarilar.length) mesaj += '\n' + uyarilar.join('\n');
+  alert(mesaj);
 }
 
 // ============================================================
