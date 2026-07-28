@@ -345,6 +345,10 @@ body {
 
 .modal-overlay.open { display: flex; }
 
+.modal-overlay .modal {
+  pointer-events: auto;
+}
+
 .modal {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1719,9 +1723,9 @@ body {
 </div>
 
 <div class="modal-overlay" id="taksit-duzenle-modal">
-  <div class="modal" style="max-width:440px;">
+  <div class="modal" style="max-width:520px;" onclick="event.stopPropagation()">
     <div class="modal-header">
-      <span class="modal-title">✏ Taksit Düzenle</span>
+      <span class="modal-title">✏ Taksit & Ödeme Geçmişi</span>
       <button class="modal-close" onclick="closeModal('taksit-duzenle-modal')">✕</button>
     </div>
     <div class="modal-body">
@@ -1730,32 +1734,42 @@ body {
         <label class="form-label">Kredi / Açıklama</label>
         <input type="text" class="form-control" id="td-aciklama" readonly style="background:#f8f9fc;color:#6b7280;">
       </div>
-      <div class="form-group">
-        <label class="form-label">Vade Tarihi</label>
-        <input type="date" class="form-control" id="td-vade">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Taksit Tutarı (₺)</label>
-        <input type="number" class="form-control" id="td-tutar" step="0.01" min="0" placeholder="0,00">
-      </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Ödenen Tutar (₺)</label>
-          <input type="number" class="form-control" id="td-odenen" step="0.01" min="0" placeholder="0,00">
+          <label class="form-label">Vade Tarihi</label>
+          <input type="date" class="form-control" id="td-vade">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Taksit Tutarı (₺)</label>
+          <input type="number" class="form-control" id="td-tutar" step="0.01" min="0" placeholder="0,00">
+        </div>
+      </div>
+      <div id="td-bilgi" style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin-bottom:12px;"></div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">📋 Ödeme Geçmişi</div>
+      <div id="td-kayit-list" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;"></div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">+ Kısmi Ödeme Ekle</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tutar (₺)</label>
+          <input type="number" class="form-control" id="td-yeni-tutar" step="0.01" min="0" placeholder="0,00">
         </div>
         <div class="form-group">
           <label class="form-label">Ödeme Tarihi</label>
-          <input type="date" class="form-control" id="td-odeme-tarihi">
+          <input type="date" class="form-control" id="td-yeni-tarih">
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Not / Açıklama (opsiyonel)</label>
-        <input type="text" class="form-control" id="td-not" placeholder="Düzeltme sebebi, hafta sonu kayması vb.">
+        <label class="form-label">Not (opsiyonel)</label>
+        <input type="text" class="form-control" id="td-yeni-not" placeholder="Dekont no, açıklama...">
       </div>
-      <div id="td-bilgi" style="display:none;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin-top:8px;"></div>
+      <div class="form-group">
+        <label class="form-label">Taksit Notu</label>
+        <input type="text" class="form-control" id="td-not" placeholder="Genel not...">
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('taksit-duzenle-modal')">İptal</button>
+      <button class="btn btn-primary" style="background:#16a34a;" onclick="taksitOdemeEkle()">+ Ödeme Ekle</button>
       <button class="btn btn-primary" onclick="saveTaksitDuzenle()">💾 Kaydet</button>
     </div>
   </div>
@@ -1821,8 +1835,8 @@ body {
     <div class="modal-body">
       <div id="ode-onay-bilgi" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;"></div>
       <div class="form-group">
-        <label class="form-label">Ödenen Tutar</label>
-        <input type="number" class="form-control" id="ode-onay-tutar" min="0" step="0.01" placeholder="0">
+        <label class="form-label">Bu Ödeme Tutarı</label>
+        <input type="number" class="form-control" id="ode-onay-tutar" min="0" step="0.01" placeholder="0,00">
         <div id="ode-onay-kalan-hint" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
       </div>
       <div class="form-group">
@@ -2007,7 +2021,7 @@ body {
 var API_BASE = '';
 
 // Senkron gibi görünen async veri önbelleği
-var _cache = { odemeler: [], krediler: [], tahsilatlar: [], loaded: false };
+var _cache = { odemeler: [], krediler: [], tahsilatlar: [], odemeKayitlari: [], loaded: false };
 var _planCache = [];
 
 function apiGet(url) {
@@ -2053,6 +2067,8 @@ function reloadCache() {
   _cache.krediler = krediler || [];
   var tahsilatlar = apiGet('/api/tahsilatlar');
   _cache.tahsilatlar = tahsilatlar || [];
+  var kayitlar = apiGet('/api/odeme-kayitlari');
+  _cache.odemeKayitlari = kayitlar || [];
   _cache.loaded = true;
   var plan = apiGet('/api/planlama');
   _planCache = plan || [];
@@ -2063,9 +2079,9 @@ function reloadCache() {
 // ============================================================
 
 function loadData() {
-  if (!currentUser) return { odemeler: [], krediler: [], tahsilatlar: [] }; // Login olmadan boş döndür
+  if (!currentUser) return { odemeler: [], krediler: [], tahsilatlar: [], odemeKayitlari: [] };
   if (!_cache.loaded) reloadCache();
-  return { odemeler: _cache.odemeler, krediler: _cache.krediler, tahsilatlar: _cache.tahsilatlar };
+  return { odemeler: _cache.odemeler, krediler: _cache.krediler, tahsilatlar: _cache.tahsilatlar, odemeKayitlari: _cache.odemeKayitlari };
 }
 
 function saveData(data) {
@@ -2221,11 +2237,90 @@ function entityData() {
   };
 }
 
+function getOdemeKayitlari(odemeId) {
+  return (_cache.odemeKayitlari || []).filter(function(k) { return k.odeme_id === odemeId; });
+}
+
+function renderOdemeKayitList(odemeId, containerId) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  var kayitlar = getOdemeKayitlari(odemeId);
+  if (!kayitlar.length) {
+    el.innerHTML = '<div style="padding:12px;text-align:center;color:var(--muted);font-size:12px;">Henüz ödeme kaydı yok</div>';
+    return;
+  }
+  el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+    kayitlar.map(function(k) {
+      return '<tr style="border-bottom:1px solid var(--border);">' +
+        '<td style="padding:8px 10px;color:var(--muted);">' + (k.tarih || '-') + '</td>' +
+        '<td style="padding:8px 10px;font-weight:700;color:#16a34a;">' + fmtCurrency(k.tutar) + '</td>' +
+        '<td style="padding:8px 10px;color:var(--muted);font-size:11px;">' + (k.not_ || k.not || '') + '</td>' +
+        '<td style="padding:8px 10px;text-align:right;">' +
+          '<button class="btn btn-xs btn-danger" onclick="deleteOdemeKayit(\'' + k.id + '\',\'' + odemeId + '\')" title="Sil">✕</button>' +
+        '</td></tr>';
+    }).join('') + '</table>';
+}
+
+function odemeKayitSubRows(odemeId) {
+  return getOdemeKayitlari(odemeId).map(function(k) {
+    return '<tr style="background:#f8fafc;border-bottom:1px solid #eef2f7;">' +
+      '<td style="padding:6px 16px 6px 28px;font-size:11px;color:var(--muted);">↳ ' + (k.tarih || '-') + '</td>' +
+      '<td colspan="2" style="padding:6px 10px;font-size:11px;color:#2563eb;font-weight:600;">Kısmen ödendi: ' + fmtCurrency(k.tutar) + '</td>' +
+      '<td colspan="4" style="padding:6px 10px;font-size:10px;color:var(--muted);">' + (k.not_ || k.not || '') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function deleteOdemeKayit(kid, odemeId) {
+  if (!confirm('Bu ödeme kaydını silmek istiyor musunuz?')) return;
+  apiDelete('/api/odeme-kayitlari/' + kid);
+  _cache.loaded = false;
+  reloadCache();
+  renderOdemeKayitList(odemeId, 'td-kayit-list');
+  var o = null;
+  (_cache.odemeler || []).forEach(function(x) { if (x.id === odemeId) o = x; });
+  if (o) {
+    var b = odemeTutarBreakdown(o);
+    document.getElementById('td-bilgi').innerHTML =
+      'Toplam: <strong>' + fmtCurrency(b.ilk) + '</strong> · Ödenen: <strong style="color:#16a34a;">' + fmtCurrency(b.odenen) + '</strong> · Kalan: <strong style="color:#ea580c;">' + fmtCurrency(b.kalan) + '</strong>';
+  }
+  refreshAll();
+}
+
+function taksitOdemeEkle() {
+  var oid = document.getElementById('td-id').value;
+  var tutar = parseMoney(document.getElementById('td-yeni-tutar').value);
+  var tarih = document.getElementById('td-yeni-tarih').value;
+  var not = document.getElementById('td-yeni-not').value;
+  if (!oid || !(tutar > 0) || !tarih) return alert('Tutar ve ödeme tarihi zorunludur');
+  apiPost('/api/odemeler/' + oid + '/odendi', {
+    odenen_tutar: tutar, odeme_tarihi: tarih, not: not,
+    kaydeden: currentUser ? currentUser.ad : ''
+  });
+  _cache.loaded = false;
+  reloadCache();
+  document.getElementById('td-yeni-tutar').value = '';
+  document.getElementById('td-yeni-not').value = '';
+  renderOdemeKayitList(oid, 'td-kayit-list');
+  var o = null;
+  (_cache.odemeler || []).forEach(function(x) { if (x.id === oid) o = x; });
+  if (o) {
+    var b = odemeTutarBreakdown(o);
+    document.getElementById('td-bilgi').innerHTML =
+      'Toplam: <strong>' + fmtCurrency(b.ilk) + '</strong> · Ödenen: <strong style="color:#16a34a;">' + fmtCurrency(b.odenen) + '</strong> · Kalan: <strong style="color:#ea580c;">' + fmtCurrency(b.kalan) + '</strong>';
+  }
+  refreshAll();
+}
+
 function odemeTutarBreakdown(o) {
   var ilk = parseFloat(o.tutar || 0);
-  var odenen = parseFloat(o.odenen_tutar || 0);
+  var kayitlar = getOdemeKayitlari(o.id);
+  var odenen = kayitlar.length
+    ? kayitlar.reduce(function(s, k) { return s + parseFloat(k.tutar || 0); }, 0)
+    : parseFloat(o.odenen_tutar || 0);
   if (o.durum === 'odendi' && odenen <= 0) odenen = ilk;
-  var kalan = Math.max(0, ilk - odenen);
+  odenen = roundMoney(Math.min(ilk, odenen));
+  var kalan = Math.max(0, roundMoney(ilk - odenen));
   return { ilk: ilk, odenen: odenen, kalan: kalan, para: o.para || 'TL' };
 }
 
@@ -3933,7 +4028,7 @@ function renderKrediler() {
           (o.durum !== 'odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');reloadCache();renderKrediler();" style="font-size:11px;margin-right:4px;">✓ Öde</button>' : '') +
           '<button class="btn btn-xs btn-outline" onclick="editTaksit(\'' + o.id + '\')" title="Düzenle" style="font-size:11px;">✏</button>' +
         '</td>' +
-      '</tr>';
+      '</tr>' + odemeKayitSubRows(o.id);
     }).join('');
 
     var takTabloHTML = '<div id="tak_' + k.id + '" style="display:none;">' +
@@ -4940,7 +5035,7 @@ function markPaid(id, callback) {
 
   document.getElementById('ode-onay-bilgi').innerHTML = bilgi;
   document.getElementById('ode-onay-tutar').value = b ? b.kalan : '';
-  document.getElementById('ode-onay-kalan-hint').textContent = b ? ('Kalan borç: ' + fmtCurrency(b.kalan, b.para) + ' — kısmi ödeme girebilirsiniz') : '';
+  document.getElementById('ode-onay-kalan-hint').textContent = b ? ('Kalan borç: ' + fmtCurrency(b.kalan, b.para) + ' — bu sefer ödenecek tutar') : '';
   document.getElementById('ode-onay-tarih').value = new Date().toISOString().split('T')[0];
   document.getElementById('ode-onay-not').value = '';
   openModal('ode-onay-modal');
@@ -5156,14 +5251,15 @@ function editTaksit(oid) {
   document.getElementById('td-aciklama').value = o.aciklama || '';
   document.getElementById('td-vade').value = o.vade || '';
   document.getElementById('td-tutar').value = roundMoney(b.ilk);
-  document.getElementById('td-odenen').value = roundMoney(b.odenen);
-  document.getElementById('td-odeme-tarihi').value = o.odeme_tarihi || '';
   document.getElementById('td-not').value = o.not_ || o.not || '';
+  document.getElementById('td-yeni-tutar').value = b.kalan > 0 ? roundMoney(b.kalan) : '';
+  document.getElementById('td-yeni-tarih').value = new Date().toISOString().split('T')[0];
+  document.getElementById('td-yeni-not').value = '';
 
-  var bilgiEl = document.getElementById('td-bilgi');
-  bilgiEl.style.display = 'block';
-  bilgiEl.innerHTML = 'Kalan: <strong>' + fmtCurrency(b.kalan) + '</strong> · Mevcut vade: <strong>' + (o.vade||'-') + '</strong>';
+  document.getElementById('td-bilgi').innerHTML =
+    'Toplam: <strong>' + fmtCurrency(b.ilk) + '</strong> · Ödenen: <strong style="color:#16a34a;">' + fmtCurrency(b.odenen) + '</strong> · Kalan: <strong style="color:#ea580c;">' + fmtCurrency(b.kalan) + '</strong>';
 
+  renderOdemeKayitList(oid, 'td-kayit-list');
   openModal('taksit-duzenle-modal');
 }
 
@@ -5171,13 +5267,10 @@ function saveTaksitDuzenle() {
   var oid    = document.getElementById('td-id').value;
   var vade   = document.getElementById('td-vade').value.trim();
   var tutar  = parseMoney(document.getElementById('td-tutar').value);
-  var odenen = parseMoney(document.getElementById('td-odenen').value);
-  var odemeTarihi = document.getElementById('td-odeme-tarihi').value;
   var notVal = document.getElementById('td-not').value.trim();
 
   if (!vade) { alert('Vade tarihi zorunlu.'); return; }
   if (!(tutar > 0)) { alert('Geçerli bir tutar giriniz.'); return; }
-  if (odenen > tutar + 0.001) { alert('Ödenen tutar, taksit tutarından fazla olamaz.'); return; }
 
   var data = loadData();
   var o = null;
@@ -5186,17 +5279,13 @@ function saveTaksitDuzenle() {
   }
   if (!o) { alert('Taksit bulunamadı.'); return; }
 
-  var durum = calcOdemeDurum(tutar, odenen);
-  if (durum !== 'odendi' && o.durum === 'gecikti') durum = 'gecikti';
-
   var payload = {
     aciklama:    o.aciklama,
     tip:         o.tip,
     tutar:       tutar,
-    odenen_tutar: odenen,
     vade:        vade,
-    odeme_tarihi: odemeTarihi,
-    durum:       durum,
+    odeme_tarihi: o.odeme_tarihi || '',
+    durum:       o.durum,
     entity:      o.entity,
     para:        o.para || 'TL',
     not:         notVal !== '' ? notVal : (o.not_ || ''),
@@ -5207,7 +5296,7 @@ function saveTaksitDuzenle() {
 
   apiPut('/api/odemeler/' + oid, payload);
   closeModal('taksit-duzenle-modal');
-  reloadCache();
+  _cache.loaded = false;
   refreshAll();
 }
 
@@ -5433,9 +5522,21 @@ function doExport() {
 // MODAL OVERLAY CLOSE
 // ============================================================
 
-document.querySelectorAll('.modal-overlay').forEach(overlay => {
+document.querySelectorAll('.modal-overlay .modal').forEach(function(modal) {
+  modal.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+  modal.addEventListener('click', function(e) { e.stopPropagation(); });
+});
+
+document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+  var downOnOverlay = false;
+  overlay.addEventListener('mousedown', function(e) {
+    downOnOverlay = (e.target === overlay);
+  });
   overlay.addEventListener('click', function(e) {
-    if (e.target === this) this.classList.remove('open');
+    if (e.target === overlay && downOnOverlay) {
+      overlay.classList.remove('open');
+    }
+    downOnOverlay = false;
   });
 });
 
