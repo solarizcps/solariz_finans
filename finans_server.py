@@ -329,20 +329,32 @@ def add_odeme():
 def update_odeme(oid):
     d = request.json
     conn = get_db()
+    row = conn.execute("SELECT odenen_tutar FROM odemeler WHERE id=?", (oid,)).fetchone()
+    tutar = float(d.get('tutar', 0) or 0)
+
+    if d.get('odenen_tutar') is not None:
+        odenen = min(tutar, max(0, float(d.get('odenen_tutar') or 0)))
+        durum = d.get('durum')
+        if durum not in ('gecikti',):
+            durum = 'odendi' if odenen >= tutar - 0.01 else 'bekliyor'
+    else:
+        odenen = float(row['odenen_tutar'] or 0) if row else 0
+        durum = d.get('durum', 'bekliyor')
+
     conn.execute('''UPDATE odemeler SET
         aciklama=?, tip=?, tutar=?, para=?, vade=?, odeme_tarihi=?,
         durum=?, tekrar=?, not_=?, guncelleyen=?, guncelleme=?,
-        banka=?, cek_no=?, kredi_id=COALESCE(?,kredi_id)
+        banka=?, cek_no=?, kredi_id=COALESCE(?,kredi_id), odenen_tutar=?
         WHERE id=?''',
-        (d.get('aciklama'), d.get('tip'), d.get('tutar',0), d.get('para','TL'),
-         d.get('vade'), d.get('odeme_tarihi',''), d.get('durum','bekliyor'),
+        (d.get('aciklama'), d.get('tip'), tutar, d.get('para','TL'),
+         d.get('vade'), d.get('odeme_tarihi',''), durum,
          d.get('tekrar','tek'), d.get('not',''),
          d.get('guncelleyen'), datetime.now().isoformat(),
          d.get('banka','') or None, d.get('cek_no','') or None,
-         d.get('kredi_id') or None, oid))
+         d.get('kredi_id') or None, odenen, oid))
     conn.commit()
     conn.close()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'durum': durum, 'odenen_tutar': odenen, 'kalan': max(0, tutar - odenen)})
 
 @app.route('/api/odemeler/<oid>', methods=['DELETE'])
 def delete_odeme(oid):
@@ -429,18 +441,30 @@ def add_tahsilat():
 def update_tahsilat(tid):
     d = request.json
     conn = get_db()
+    row = conn.execute("SELECT tahsil_edilen_tutar FROM tahsilatlar WHERE id=?", (tid,)).fetchone()
+    tutar = float(d.get('tutar', 0) or 0)
+
+    if d.get('tahsil_edilen_tutar') is not None:
+        tahsil = min(tutar, max(0, float(d.get('tahsil_edilen_tutar') or 0)))
+        durum = d.get('durum')
+        if durum not in ('gecikti',):
+            durum = 'tahsil_edildi' if tahsil >= tutar - 0.01 else 'bekliyor'
+    else:
+        tahsil = float(row['tahsil_edilen_tutar'] or 0) if row else 0
+        durum = d.get('durum', 'bekliyor')
+
     conn.execute('''UPDATE tahsilatlar SET
         entity=?, aciklama=?, tip=?, tutar=?, para=?, vade=?, tahsilat_tarihi=?,
-        durum=?, musteri=?, cek_no=?, banka=?, not_=?, guncelleyen=?, guncelleme=?
+        durum=?, tahsil_edilen_tutar=?, musteri=?, cek_no=?, banka=?, not_=?, guncelleyen=?, guncelleme=?
         WHERE id=?''',
-        (d.get('entity'), d.get('aciklama'), d.get('tip'), d.get('tutar',0),
+        (d.get('entity'), d.get('aciklama'), d.get('tip'), tutar,
          d.get('para','TL'), d.get('vade'), d.get('tahsilat_tarihi',''),
-         d.get('durum','bekliyor'), d.get('musteri',''), d.get('cek_no',''),
+         durum, tahsil, d.get('musteri',''), d.get('cek_no',''),
          d.get('banka',''), d.get('not',''), d.get('guncelleyen'),
          datetime.now().isoformat(), tid))
     conn.commit()
     conn.close()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'durum': durum, 'tahsil_edilen_tutar': tahsil, 'kalan': max(0, tutar - tahsil)})
 
 @app.route('/api/tahsilatlar/<tid>', methods=['DELETE'])
 def delete_tahsilat(tid):

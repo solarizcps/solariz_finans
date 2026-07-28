@@ -999,7 +999,7 @@ body {
       </div>
       <div>
         <label class="form-label">Tutar</label>
-        <input type="number" class="form-control" id="kasa-tutar" placeholder="0">
+        <input type="number" class="form-control" id="kasa-tutar" placeholder="0,00" min="0" step="0.01">
       </div>
       <div>
         <label class="form-label">Para Birimi</label>
@@ -1127,7 +1127,7 @@ body {
       </div>
       <div>
         <label class="form-label">Tutar (₺)</label>
-        <input type="number" class="form-control" id="cf-gelir-tutar" placeholder="0">
+        <input type="number" class="form-control" id="cf-gelir-tutar" placeholder="0,00" min="0" step="0.01">
       </div>
       <div>
         <label class="form-label">Tarih</label>
@@ -1357,7 +1357,7 @@ body {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Tutar (₺)</label>
-          <input type="number" class="form-control" id="po-tutar" placeholder="0">
+          <input type="number" class="form-control" id="po-tutar" placeholder="0,00" min="0" step="0.01">
         </div>
         <div class="form-group">
           <label class="form-label">Para Birimi</label>
@@ -1430,7 +1430,12 @@ body {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Tutar (₺)</label>
-          <input type="number" class="form-control" id="odeme-tutar" placeholder="0.00">
+          <input type="number" class="form-control" id="odeme-tutar" placeholder="0,00" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ödenen Tutar</label>
+          <input type="number" class="form-control" id="odeme-odenen" placeholder="0,00" min="0" step="0.01">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px;">Kısmi ödeme veya düzeltme için</div>
         </div>
         <div class="form-group">
           <label class="form-label">Para Birimi</label>
@@ -1605,11 +1610,11 @@ body {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Toplam Borç</label>
-          <input type="number" class="form-control" id="kredi-toplam" placeholder="0" oninput="krediTaksitHesapla()">
+          <input type="number" class="form-control" id="kredi-toplam" placeholder="0,00" min="0" step="0.01" oninput="krediTaksitHesapla()">
         </div>
         <div class="form-group">
           <label class="form-label">Aylık Taksit</label>
-          <input type="number" class="form-control" id="kredi-taksit" placeholder="0" oninput="krediTaksitHesapla()">
+          <input type="number" class="form-control" id="kredi-taksit" placeholder="0,00" min="0" step="0.01" oninput="krediTaksitHesapla()">
         </div>
       </div>
       <div class="form-row">
@@ -1731,7 +1736,17 @@ body {
       </div>
       <div class="form-group">
         <label class="form-label">Taksit Tutarı (₺)</label>
-        <input type="number" class="form-control" id="td-tutar" step="0.01" placeholder="0.00">
+        <input type="number" class="form-control" id="td-tutar" step="0.01" min="0" placeholder="0,00">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Ödenen Tutar (₺)</label>
+          <input type="number" class="form-control" id="td-odenen" step="0.01" min="0" placeholder="0,00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ödeme Tarihi</label>
+          <input type="date" class="form-control" id="td-odeme-tarihi">
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Not / Açıklama (opsiyonel)</label>
@@ -1760,7 +1775,7 @@ body {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Tutar</label>
-          <input type="number" class="form-control" id="q-tutar" placeholder="0">
+          <input type="number" class="form-control" id="q-tutar" placeholder="0,00" min="0" step="0.01">
         </div>
         <div class="form-group">
           <label class="form-label">Vade</label>
@@ -1880,7 +1895,7 @@ body {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Tutar</label>
-          <input type="number" class="form-control" id="tahsilat-tutar" placeholder="0.00">
+          <input type="number" class="form-control" id="tahsilat-tutar" placeholder="0,00" min="0" step="0.01">
         </div>
         <div class="form-group">
           <label class="form-label">Para Birimi</label>
@@ -2129,14 +2144,44 @@ function switchTab(tab) {
 // HELPERS
 // ============================================================
 
+function roundMoney(n) {
+  return Math.round((parseFloat(n) || 0) * 100) / 100;
+}
+
+function parseMoney(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return roundMoney(val);
+  var s = String(val).trim().replace(/\s/g, '');
+  if (s.indexOf(',') >= 0) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  }
+  return roundMoney(parseFloat(s) || 0);
+}
+
 function fmt(n) {
-  if (!n && n !== 0) return '-';
-  return new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+  if (n === null || n === undefined || n === '') return '-';
+  var num = parseFloat(n);
+  if (isNaN(num)) return '-';
+  return new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
 }
 
 function fmtCurrency(n, para = 'TL') {
-  var sym = { TL: '₺', USD: '$', EUR: '€' };
+  var sym = { TL: '₺', USD: '$', EUR: '€', XAU: '🥇' };
   return (sym[para] || '₺') + fmt(n);
+}
+
+function calcOdemeDurum(tutar, odenen) {
+  tutar = roundMoney(tutar);
+  odenen = roundMoney(odenen);
+  if (odenen >= tutar - 0.001) return 'odendi';
+  return 'bekliyor';
+}
+
+function calcTahsilDurum(tutar, tahsil) {
+  tutar = roundMoney(tutar);
+  tahsil = roundMoney(tahsil);
+  if (tahsil >= tutar - 0.001) return 'tahsil_edildi';
+  return 'bekliyor';
 }
 
 function toTL(o) {
@@ -2226,6 +2271,7 @@ function tipLabel(t) {
 function tahsilatTutarBreakdown(t) {
   var ilk = parseFloat(t.tutar || 0);
   var odenen = parseFloat(t.tahsil_edilen_tutar || 0);
+  if (t.durum === 'tahsil_edildi' && odenen <= 0) odenen = ilk;
   var kalan = Math.max(0, ilk - odenen);
   return { ilk: ilk, odenen: odenen, kalan: kalan, para: t.para || 'TL' };
 }
@@ -3329,9 +3375,15 @@ function renderOdemeler() {
   var ozKart = document.getElementById('odeme-ozet-kartlar');
   if (ozKart) {
     var topTutar  = ozOdemeler.reduce(function(s,o){return s+toTL(o);},0);
-    var odTutar   = ozOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
-    var bekTutar  = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).reduce(function(s,o){return s+toTL(o);},0);
-    var gecTutar  = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).reduce(function(s,o){return s+toTL(o);},0);
+    var odTutar   = ozOdemeler.reduce(function(s,o){ return s + toTL({ tutar: odemeTutarBreakdown(o).odenen, para: o.para }); },0);
+    var bekTutar  = ozOdemeler.reduce(function(s,o){
+      var b = odemeTutarBreakdown(o);
+      return s + (o.durum === 'bekliyor' ? toTL({ tutar: b.kalan, para: o.para }) : 0);
+    },0);
+    var gecTutar  = ozOdemeler.reduce(function(s,o){
+      var b = odemeTutarBreakdown(o);
+      return s + (o.durum === 'gecikti' ? toTL({ tutar: b.kalan, para: o.para }) : 0);
+    },0);
     var kalanBorc = bekTutar + gecTutar;
     var odSay     = ozOdemeler.filter(function(o){return o.durum==='odendi';}).length;
     var bekSay    = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).length;
@@ -3725,8 +3777,14 @@ function renderKrediler() {
   var toplamCekilenBORC = 0, toplamOdenen = 0, toplamKalan = 0, aktifSayac = 0, tamSayac = 0;
   krediDetay.forEach(function(det) {
     var total = parseFloat(det.k.toplam||0);
-    var odTutar = det.ilgili.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
-    var bekTutar = det.bekleyenler.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
+    var oz = det.ilgili.reduce(function(acc, o) {
+      var b = odemeTutarBreakdown(o);
+      acc.odenen += b.odenen;
+      acc.kalan += b.kalan;
+      return acc;
+    }, { odenen: 0, kalan: 0 });
+    var odTutar = oz.odenen;
+    var bekTutar = oz.kalan;
     toplamCekilenBORC += total;
     toplamOdenen += odTutar;
     toplamKalan += bekTutar || (det.aktif ? total - odTutar : 0);
@@ -3776,10 +3834,10 @@ function renderKrediler() {
   // Özet kartlar — doğru hesap
   var topToplam  = krediler.reduce(function(s,k){return s+parseFloat(k.toplam||0);},0);
   var topOdenen  = krediDetay.reduce(function(s,d){
-    return s + d.ilgili.filter(function(o){return o.durum==='odendi';}).reduce(function(ss,o){return ss+parseFloat(o.tutar||0);},0);
+    return s + d.ilgili.reduce(function(ss,o){ return ss + odemeTutarBreakdown(o).odenen; }, 0);
   },0);
   var topKalan   = krediDetay.reduce(function(s,d){
-    return s + d.bekleyenler.reduce(function(ss,o){return ss+parseFloat(o.tutar||0);},0);
+    return s + d.ilgili.reduce(function(ss,o){ return ss + odemeTutarBreakdown(o).kalan; }, 0);
   },0);
   // Taksit bilgisi olmayan krediler için toplam - odenen ile hesapla
   if (topOdenen === 0) topOdenen = 0;
@@ -4053,13 +4111,13 @@ function renderCalendar() {
   renderCalSidebar(odemeler, plan, tahsilatlar);
 }
 
-// Kısaltılmış tutar: 1.250.000 → 1.25M, 85.000 → 85K
+// Kısaltılmış tutar — takvim kenar çubuğu
 function fmtK(n) {
-  var abs = Math.abs(n);
+  var abs = Math.abs(parseFloat(n) || 0);
   var sign = n < 0 ? '-' : '';
-  if (abs >= 1000000) return sign + (abs/1000000).toFixed(1).replace('.0','') + 'M';
-  if (abs >= 1000)    return sign + Math.round(abs/1000) + 'K';
-  return sign + Math.round(abs);
+  if (abs >= 1000000) return sign + fmt(abs / 1000000).replace(',00', '') + 'M';
+  if (abs >= 10000) return sign + fmt(abs / 1000).replace(',00', '') + 'K';
+  return sign + fmt(abs);
 }
 
 function renderCalSidebar(odemeler, plan, tahsilatlar) {
@@ -4320,7 +4378,7 @@ function editKasa(id) {
 function kasaHareketEkle() {
   var id       = (document.getElementById('kasa-id').value || '').trim();
   var aciklama = document.getElementById('kasa-aciklama').value.trim();
-  var tutar    = parseFloat(document.getElementById('kasa-tutar').value);
+  var tutar    = parseMoney(document.getElementById('kasa-tutar').value);
   var para     = document.getElementById('kasa-para').value;
   var tarih    = document.getElementById('kasa-tarih').value;
   var tip      = document.getElementById('kasa-tip').value;
@@ -4716,7 +4774,8 @@ function saveOdeme() {
   var id = document.getElementById('odeme-id').value;
   var aciklama = document.getElementById('odeme-aciklama').value.trim();
   var tip = document.getElementById('odeme-tip').value;
-  var tutar = parseFloat(document.getElementById('odeme-tutar').value);
+  var tutar = parseMoney(document.getElementById('odeme-tutar').value);
+  var odenen = parseMoney(document.getElementById('odeme-odenen').value);
   var para = document.getElementById('odeme-para').value;
   var vade = document.getElementById('odeme-vade').value;
   var odeme_tarihi = document.getElementById('odeme-tarih').value;
@@ -4724,8 +4783,10 @@ function saveOdeme() {
   var tekrar = document.getElementById('odeme-tekrar').value;
   var not = document.getElementById('odeme-not').value;
   if (!aciklama || !tutar || !vade) return alert('Açıklama, tutar ve vade tarihi zorunludur');
+  if (odenen > tutar + 0.001) return alert('Ödenen tutar, toplam tutardan fazla olamaz');
+  if (odenen > 0) durum = calcOdemeDurum(tutar, odenen);
   var odemeEntity = (document.getElementById('odeme-entity') ? document.getElementById('odeme-entity').value : null) || currentEntity || 'solariz';
-  var payload = { entity: odemeEntity, aciklama: aciklama, tip: tip, tutar: tutar, para: para,
+  var payload = { entity: odemeEntity, aciklama: aciklama, tip: tip, tutar: tutar, odenen_tutar: odenen, para: para,
     vade: vade, odeme_tarihi: odeme_tarihi, durum: durum, tekrar: tekrar, not: not,
     kaydeden: currentUser ? currentUser.ad : '' };
   if (id) {
@@ -4748,7 +4809,8 @@ function editOdeme(id) {
   document.getElementById('odeme-id').value = o.id;
   document.getElementById('odeme-aciklama').value = o.aciklama || '';
   document.getElementById('odeme-tip').value = o.tip || 'tedarikci';
-  document.getElementById('odeme-tutar').value = o.tutar || '';
+  document.getElementById('odeme-tutar').value = roundMoney(o.tutar || 0);
+  document.getElementById('odeme-odenen').value = roundMoney(odemeTutarBreakdown(o).odenen);
   document.getElementById('odeme-para').value = o.para || 'TL';
   document.getElementById('odeme-vade').value = o.vade || '';
   document.getElementById('odeme-tarih').value = o.odeme_tarihi || '';
@@ -4888,7 +4950,7 @@ function markPaidOnay() {
   if (!_markPaidId) return;
   var tarih = document.getElementById('ode-onay-tarih').value;
   var not   = document.getElementById('ode-onay-not').value;
-  var tutar = parseFloat(document.getElementById('ode-onay-tutar').value);
+  var tutar = parseMoney(document.getElementById('ode-onay-tutar').value);
   if (!tutar || tutar <= 0) return alert('Geçerli bir ödeme tutarı giriniz');
   apiPost('/api/odemeler/' + _markPaidId + '/odendi', { odeme_tarihi: tarih, not: not, odenen_tutar: tutar });
   _cache.loaded = false;
@@ -4899,7 +4961,7 @@ function markPaidOnay() {
 }
 
 function clearOdemeForm() {
-  ['odeme-id','odeme-aciklama','odeme-tutar','odeme-vade','odeme-tarih','odeme-not'].forEach(function(fid) { document.getElementById(fid).value = ''; });
+  ['odeme-id','odeme-aciklama','odeme-tutar','odeme-odenen','odeme-vade','odeme-tarih','odeme-not'].forEach(function(fid) { document.getElementById(fid).value = ''; });
   document.getElementById('odeme-tip').value = 'tedarikci';
   document.getElementById('odeme-para').value = 'TL';
   document.getElementById('odeme-durum').value = 'bekliyor';
@@ -5088,17 +5150,19 @@ function editTaksit(oid) {
     if (data.odemeler[i].id === oid) { o = data.odemeler[i]; break; }
   }
   if (!o) { alert('Taksit bulunamadı.'); return; }
+  var b = odemeTutarBreakdown(o);
 
-  document.getElementById('td-id').value      = o.id;
+  document.getElementById('td-id').value = o.id;
   document.getElementById('td-aciklama').value = o.aciklama || '';
-  document.getElementById('td-vade').value    = o.vade || '';
-  document.getElementById('td-tutar').value   = o.tutar || '';
-  document.getElementById('td-not').value     = '';
+  document.getElementById('td-vade').value = o.vade || '';
+  document.getElementById('td-tutar').value = roundMoney(b.ilk);
+  document.getElementById('td-odenen').value = roundMoney(b.odenen);
+  document.getElementById('td-odeme-tarihi').value = o.odeme_tarihi || '';
+  document.getElementById('td-not').value = o.not_ || o.not || '';
 
   var bilgiEl = document.getElementById('td-bilgi');
   bilgiEl.style.display = 'block';
-  bilgiEl.innerHTML = 'Mevcut: <strong>' + (o.vade||'-') + '</strong> · <strong>' + fmtCurrency(o.tutar) + '</strong>' +
-    (o.not_ ? ' · Not: ' + o.not_ : '');
+  bilgiEl.innerHTML = 'Kalan: <strong>' + fmtCurrency(b.kalan) + '</strong> · Mevcut vade: <strong>' + (o.vade||'-') + '</strong>';
 
   openModal('taksit-duzenle-modal');
 }
@@ -5106,11 +5170,14 @@ function editTaksit(oid) {
 function saveTaksitDuzenle() {
   var oid    = document.getElementById('td-id').value;
   var vade   = document.getElementById('td-vade').value.trim();
-  var tutar  = parseFloat(document.getElementById('td-tutar').value);
+  var tutar  = parseMoney(document.getElementById('td-tutar').value);
+  var odenen = parseMoney(document.getElementById('td-odenen').value);
+  var odemeTarihi = document.getElementById('td-odeme-tarihi').value;
   var notVal = document.getElementById('td-not').value.trim();
 
-  if (!vade)       { alert('Vade tarihi zorunlu.'); return; }
-  if (isNaN(tutar) || tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
+  if (!vade) { alert('Vade tarihi zorunlu.'); return; }
+  if (!(tutar > 0)) { alert('Geçerli bir tutar giriniz.'); return; }
+  if (odenen > tutar + 0.001) { alert('Ödenen tutar, taksit tutarından fazla olamaz.'); return; }
 
   var data = loadData();
   var o = null;
@@ -5119,24 +5186,29 @@ function saveTaksitDuzenle() {
   }
   if (!o) { alert('Taksit bulunamadı.'); return; }
 
+  var durum = calcOdemeDurum(tutar, odenen);
+  if (durum !== 'odendi' && o.durum === 'gecikti') durum = 'gecikti';
+
   var payload = {
     aciklama:    o.aciklama,
     tip:         o.tip,
     tutar:       tutar,
+    odenen_tutar: odenen,
     vade:        vade,
-    durum:       o.durum,
+    odeme_tarihi: odemeTarihi,
+    durum:       durum,
     entity:      o.entity,
     para:        o.para || 'TL',
     not:         notVal !== '' ? notVal : (o.not_ || ''),
     banka:       o.banka || '',
-    guncelleyen: 'kullanici'
+    kredi_id:    o.kredi_id || null,
+    guncelleyen: currentUser ? currentUser.ad : 'kullanici'
   };
 
   apiPut('/api/odemeler/' + oid, payload);
   closeModal('taksit-duzenle-modal');
   reloadCache();
-  renderKrediler();
-  if (typeof renderCalendar === 'function') renderCalendar();
+  refreshAll();
 }
 
 function clearKrediForm() {
