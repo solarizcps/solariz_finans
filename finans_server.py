@@ -112,6 +112,34 @@ def init_db():
     except Exception:
         pass  # Zaten varsa sessizce geç
 
+    # Migration: kısmi ödeme takibi
+    try:
+        c.execute("ALTER TABLE odemeler ADD COLUMN odenen_tutar REAL DEFAULT 0")
+        print("[DB] odemeler.odenen_tutar sütunu eklendi")
+    except Exception:
+        pass
+
+    c.execute('''CREATE TABLE IF NOT EXISTS tahsilatlar (
+        id                  TEXT PRIMARY KEY,
+        entity              TEXT NOT NULL,
+        aciklama            TEXT,
+        tip                 TEXT,
+        tutar               REAL DEFAULT 0,
+        para                TEXT DEFAULT 'TL',
+        vade                TEXT,
+        tahsilat_tarihi     TEXT,
+        durum               TEXT DEFAULT 'bekliyor',
+        tahsil_edilen_tutar REAL DEFAULT 0,
+        musteri             TEXT,
+        cek_no              TEXT,
+        banka               TEXT,
+        not_                TEXT,
+        kaydeden            TEXT,
+        kayit_tarihi        TEXT,
+        guncelleyen         TEXT,
+        guncelleme          TEXT
+    )''')
+
     conn.commit()
     conn.close()
     print(f"[DB] Veritabanı hazır: {DB_PATH}")
@@ -242,6 +270,20 @@ def add_kasa():
     conn.close()
     return jsonify({'ok': True, 'id': kid})
 
+@app.route('/api/kasa/<kid>', methods=['PUT'])
+def update_kasa(kid):
+    d = request.json
+    conn = get_db()
+    conn.execute('''UPDATE kasa SET
+        entity=?, aciklama=?, tutar=?, para=?, tarih=?, tip=?, not_=?, banka=?
+        WHERE id=?''',
+        (d.get('entity','solariz'), d.get('aciklama'), d.get('tutar',0),
+         d.get('para','TL'), d.get('tarih'), d.get('tip','giris'),
+         d.get('not',''), d.get('banka','') or None, kid))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
 @app.route('/api/kasa/<kid>', methods=['DELETE'])
 def delete_kasa(kid):
     conn = get_db()
@@ -313,17 +355,140 @@ def delete_odeme(oid):
 @app.route('/api/odemeler/<oid>/odendi', methods=['POST'])
 def mark_odendi(oid):
     d = request.json or {}
-    # Tarih ve not parametresi desteklendi
     tarih = d.get('odeme_tarihi') or d.get('tarih') or datetime.now().strftime('%Y-%m-%d')
     not_  = d.get('not') or d.get('not_') or ''
     conn = get_db()
+    row = conn.execute(
+        "SELECT tutar, odenen_tutar FROM odemeler WHERE id=?", (oid,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Kayıt bulunamadı'}), 404
+
+    toplam = float(row['tutar'] or 0)
+    mevcut = float(row['odenen_tutar'] or 0)
+    kalan = max(0, toplam - mevcut)
+
+    if d.get('odenen_tutar') is not None or d.get('tutar_odeme') is not None:
+        odeme_miktari = float(d.get('odenen_tutar') if d.get('odenen_tutar') is not None else d.get('tutar_odeme') or 0)
+    else:
+        odeme_miktari = kalan
+
+    if odeme_miktari <= 0:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Geçerli bir ödeme tutarı giriniz'}), 400
+    if odeme_miktari > kalan + 0.01:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Ödeme tutarı kalan borçtan fazla olamaz'}), 400
+
+    yeni_odenen = min(toplam, mevcut + odeme_miktari)
+    durum = 'odendi' if yeni_odenen >= toplam - 0.01 else 'bekliyor'
+
     conn.execute(
-        "UPDATE odemeler SET durum='odendi', odeme_tarihi=?, not_=CASE WHEN ? != '' THEN ? ELSE not_ END WHERE id=?",
-        (tarih, not_, not_, oid)
+        "UPDATE odemeler SET durum=?, odeme_tarihi=?, odenen_tutar=?, not_=CASE WHEN ? != '' THEN ? ELSE not_ END WHERE id=?",
+        (durum, tarih, yeni_odenen, not_, not_, oid)
     )
     conn.commit()
     conn.close()
+    return jsonify({'ok': True, 'durum': durum, 'odenen_tutar': yeni_odenen, 'kalan': max(0, toplam - yeni_odenen)})
+
+# ============================================================
+# TAHSİLATLAR
+# ============================================================
+
+@app.route('/api/tahsilatlar', methods=['GET'])
+def get_tahsilatlar():
+    entity = request.args.get('entity', '')
+    conn = get_db()
+    if entity:
+        rows = conn.execute("SELECT * FROM tahsilatlar WHERE entity=? ORDER BY vade", (entity,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM tahsilatlar ORDER BY entity, vade").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/tahsilatlar', methods=['POST'])
+def add_tahsilat():
+    d = request.json
+    tid = d.get('id') or str(uuid.uuid4())[:10]
+    conn = get_db()
+    conn.execute('''INSERT OR REPLACE INTO tahsilatlar
+        (id,entity,aciklama,tip,tutar,para,vade,tahsilat_tarihi,durum,tahsil_edilen_tutar,
+         musteri,cek_no,banka,not_,kaydeden,kayit_tarihi)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (tid, d.get('entity'), d.get('aciklama'), d.get('tip'), d.get('tutar',0),
+         d.get('para','TL'), d.get('vade'), d.get('tahsilat_tarihi',''),
+         d.get('durum','bekliyor'), d.get('tahsil_edilen_tutar',0),
+         d.get('musteri',''), d.get('cek_no',''), d.get('banka',''),
+         d.get('not',''), d.get('kaydeden'), datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'id': tid})
+
+@app.route('/api/tahsilatlar/<tid>', methods=['PUT'])
+def update_tahsilat(tid):
+    d = request.json
+    conn = get_db()
+    conn.execute('''UPDATE tahsilatlar SET
+        entity=?, aciklama=?, tip=?, tutar=?, para=?, vade=?, tahsilat_tarihi=?,
+        durum=?, musteri=?, cek_no=?, banka=?, not_=?, guncelleyen=?, guncelleme=?
+        WHERE id=?''',
+        (d.get('entity'), d.get('aciklama'), d.get('tip'), d.get('tutar',0),
+         d.get('para','TL'), d.get('vade'), d.get('tahsilat_tarihi',''),
+         d.get('durum','bekliyor'), d.get('musteri',''), d.get('cek_no',''),
+         d.get('banka',''), d.get('not',''), d.get('guncelleyen'),
+         datetime.now().isoformat(), tid))
+    conn.commit()
+    conn.close()
     return jsonify({'ok': True})
+
+@app.route('/api/tahsilatlar/<tid>', methods=['DELETE'])
+def delete_tahsilat(tid):
+    conn = get_db()
+    conn.execute("DELETE FROM tahsilatlar WHERE id=?", (tid,))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+@app.route('/api/tahsilatlar/<tid>/tahsil', methods=['POST'])
+def mark_tahsil(tid):
+    d = request.json or {}
+    tarih = d.get('tahsilat_tarihi') or d.get('tarih') or datetime.now().strftime('%Y-%m-%d')
+    not_  = d.get('not') or d.get('not_') or ''
+    conn = get_db()
+    row = conn.execute(
+        "SELECT tutar, tahsil_edilen_tutar FROM tahsilatlar WHERE id=?", (tid,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Kayıt bulunamadı'}), 404
+
+    toplam = float(row['tutar'] or 0)
+    mevcut = float(row['tahsil_edilen_tutar'] or 0)
+    kalan = max(0, toplam - mevcut)
+
+    if d.get('tahsil_edilen_tutar') is not None or d.get('tutar_tahsil') is not None:
+        tahsil_miktari = float(d.get('tahsil_edilen_tutar') if d.get('tahsil_edilen_tutar') is not None else d.get('tutar_tahsil') or 0)
+    else:
+        tahsil_miktari = kalan
+
+    if tahsil_miktari <= 0:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Geçerli bir tahsilat tutarı giriniz'}), 400
+    if tahsil_miktari > kalan + 0.01:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Tahsilat tutarı kalan tutardan fazla olamaz'}), 400
+
+    yeni_tahsil = min(toplam, mevcut + tahsil_miktari)
+    durum = 'tahsil_edildi' if yeni_tahsil >= toplam - 0.01 else 'bekliyor'
+
+    conn.execute(
+        "UPDATE tahsilatlar SET durum=?, tahsilat_tarihi=?, tahsil_edilen_tutar=?, not_=CASE WHEN ? != '' THEN ? ELSE not_ END WHERE id=?",
+        (durum, tarih, yeni_tahsil, not_, not_, tid)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'durum': durum, 'tahsil_edilen_tutar': yeni_tahsil, 'kalan': max(0, toplam - yeni_tahsil)})
 
 # ============================================================
 # KREDİLER
