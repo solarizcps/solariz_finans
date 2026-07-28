@@ -341,9 +341,13 @@ body {
   z-index: 1000;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
 }
 
-.modal-overlay.open { display: flex; }
+.modal-overlay.open {
+  display: flex;
+  pointer-events: auto;
+}
 
 .modal-overlay .modal {
   pointer-events: auto;
@@ -1660,7 +1664,7 @@ body {
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('kredi-modal');clearKrediForm()">İptal</button>
-      <button class="btn btn-primary" onclick="saveKredi()">💾 Kaydet</button>
+      <button class="btn btn-primary" id="kredi-kaydet-btn" onclick="saveKredi()">💾 Kaydet</button>
     </div>
   </div>
 </div>
@@ -2068,7 +2072,7 @@ function reloadCache() {
   var tahsilatlar = apiGet('/api/tahsilatlar');
   _cache.tahsilatlar = tahsilatlar || [];
   var kayitlar = apiGet('/api/odeme-kayitlari');
-  _cache.odemeKayitlari = kayitlar || [];
+  _cache.odemeKayitlari = Array.isArray(kayitlar) ? kayitlar : [];
   _cache.loaded = true;
   var plan = apiGet('/api/planlama');
   _planCache = plan || [];
@@ -2378,6 +2382,7 @@ function tahsilatTutarBreakdown(t) {
 
 
 function refreshAll() {
+  document.querySelectorAll('.modal-overlay.open').forEach(function(el) { el.classList.remove('open'); });
   loadKurlar();
   renderAlerts();
   renderSummaryCards();
@@ -3825,6 +3830,63 @@ function markTahsilOnay() {
 // ============================================================
 
 var _krediFiltre = 'aktif';
+var KREDI_MAX_TAKSIT = 360;
+var _krediSaving = false;
+
+function krediAdNorm(ad) {
+  return (ad || '').toLowerCase().trim();
+}
+
+function krediTaksitEslestir(kredi, odeme, tumKrediler) {
+  if (odeme.tip !== 'taksit') return false;
+  if (odeme.kredi_id) return odeme.kredi_id === kredi.id;
+  var oAc = (odeme.aciklama || '').toLowerCase().trim();
+  var kAd = krediAdNorm(kredi.ad);
+  if (!kAd || oAc.indexOf(kAd + ' ') !== 0) return false;
+  var ayniAd = 0;
+  for (var i = 0; i < tumKrediler.length; i++) {
+    if (krediAdNorm(tumKrediler[i].ad) === kAd) ayniAd++;
+  }
+  if (ayniAd > 1) return false;
+  for (var j = 0; j < tumKrediler.length; j++) {
+    var dAd = krediAdNorm(tumKrediler[j].ad);
+    if (dAd !== kAd && oAc.indexOf(dAd + ' ') === 0 && dAd.length > kAd.length) return false;
+  }
+  return true;
+}
+
+function krediTaksitSayisiUygun(sayi) {
+  return sayi > 0 && sayi <= KREDI_MAX_TAKSIT;
+}
+
+function krediGlobalOzet(krediDetay, krediler) {
+  var seen = {};
+  var odenen = 0;
+  var kalan = 0;
+  krediDetay.forEach(function(det) {
+    det.ilgili.forEach(function(o) {
+      if (seen[o.id]) return;
+      seen[o.id] = true;
+      var b = odemeTutarBreakdown(o);
+      odenen += b.odenen;
+      kalan += b.kalan;
+    });
+  });
+  krediDetay.forEach(function(det) {
+    if (det.ilgili.length === 0 && det.aktif) {
+      kalan += parseFloat(det.k.toplam || 0);
+    }
+  });
+  var topToplam = (krediler || []).reduce(function(s, k) {
+    return s + parseFloat(k.toplam || 0);
+  }, 0);
+  if (kalan <= 0 && topToplam > odenen) kalan = topToplam - odenen;
+  return {
+    topToplam: topToplam,
+    topOdenen: odenen,
+    topKalan: Math.max(0, kalan)
+  };
+}
 
 function krediFiltreDegistir(filtre) {
   _krediFiltre = filtre;
@@ -3844,102 +3906,21 @@ function renderKrediler() {
     return;
   }
 
-  function eslestir(kredi, odeme, tumKrediler) {
-    if (odeme.tip !== 'taksit') return false;
-    // Yeni kayıtlar: kredi_id varsa doğrudan eşleştir
-    if (odeme.kredi_id) return odeme.kredi_id === kredi.id;
-    // Eski kayıtlar (kredi_id=null): isim prefix eşleştirmesi (backward compat)
-    var oAc = (odeme.aciklama || '').toLowerCase().trim();
-    var kAd = (kredi.ad || '').toLowerCase().trim();
-    if (oAc.indexOf(kAd + ' ') !== 0) return false;
-    var enUzun = kAd.length;
-    for (var i = 0; i < tumKrediler.length; i++) {
-      var dAd = (tumKrediler[i].ad || '').toLowerCase().trim();
-      if (dAd !== kAd && oAc.indexOf(dAd + ' ') === 0 && dAd.length > enUzun) return false;
-    }
-    return true;
-  }
-
   // Önce tüm kredilerin kalan taksitini hesapla, sonra filtrele
   var krediDetay = krediler.map(function(k) {
-    var ilgili = odemeler.filter(function(o){ return eslestir(k, o, krediler); })
+    var ilgili = odemeler.filter(function(o){ return krediTaksitEslestir(k, o, krediler); })
       .sort(function(a,b){ return (a.vade||'') > (b.vade||'') ? 1 : -1; });
     var bekleyenler = ilgili.filter(function(o){ return o.durum !== 'odendi'; });
     return { k: k, ilgili: ilgili, bekleyenler: bekleyenler, aktif: bekleyenler.length > 0 };
   });
 
-  // Özet kartları hesapla — tüm kredilerden
-  var toplamCekilenBORC = 0, toplamOdenen = 0, toplamKalan = 0, aktifSayac = 0, tamSayac = 0;
-  krediDetay.forEach(function(det) {
-    var total = parseFloat(det.k.toplam||0);
-    var oz = det.ilgili.reduce(function(acc, o) {
-      var b = odemeTutarBreakdown(o);
-      acc.odenen += b.odenen;
-      acc.kalan += b.kalan;
-      return acc;
-    }, { odenen: 0, kalan: 0 });
-    var odTutar = oz.odenen;
-    var bekTutar = oz.kalan;
-    toplamCekilenBORC += total;
-    toplamOdenen += odTutar;
-    toplamKalan += bekTutar || (det.aktif ? total - odTutar : 0);
-    if (det.aktif) aktifSayac++; else tamSayac++;
-  });
-
-  var ozKartEl = document.getElementById('kredi-ozet-kartlar');
-  if (ozKartEl) {
-    ozKartEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px;">' +
-      '<div class="card" style="--accent-color:#1a1d2e;">' +
-        '<div class="card-label">Toplam Kredi Sayısı</div>' +
-        '<div class="card-value" style="font-size:22px;">' + krediDetay.length + '</div>' +
-        '<div class="card-sub">' + aktifSayac + ' aktif · ' + tamSayac + ' tamamlandı</div>' +
-      '</div>' +
-      '<div class="card" style="--accent-color:var(--c-blue);">' +
-        '<div class="card-label">Toplam Çekilen</div>' +
-        '<div class="card-value" style="font-size:22px;">' + fmtCurrency(toplamCekilenBORC) + '</div>' +
-        '<div class="card-sub">Toplam kredi tutarı</div>' +
-      '</div>' +
-      '<div class="card" style="--accent-color:var(--c-green);">' +
-        '<div class="card-label">Ödenen</div>' +
-        '<div class="card-value green" style="font-size:22px;">' + fmtCurrency(toplamOdenen) + '</div>' +
-        '<div class="card-sub">Bugüne kadar ödenen</div>' +
-      '</div>' +
-      '<div class="card" style="--accent-color:var(--c-red);">' +
-        '<div class="card-label">Kalan Borç</div>' +
-        '<div class="card-value red" style="font-size:22px;">' + fmtCurrency(toplamKalan) + '</div>' +
-        '<div class="card-sub">Gerçek kalan borç</div>' +
-      '</div>' +
-    '</div>';
-  }
-
+  var go = krediGlobalOzet(krediDetay, krediler);
+  var topToplam = go.topToplam;
+  var topOdenen = go.topOdenen;
+  var topKalan = go.topKalan;
   var aktifSay = krediDetay.filter(function(d){ return d.aktif; }).length;
   var tamSay   = krediDetay.filter(function(d){ return !d.aktif; }).length;
-
-  var gosterilecek = _krediFiltre === 'aktif'
-    ? krediDetay.filter(function(d){ return d.aktif; })
-    : krediDetay;
-
-  if (!gosterilecek.length) {
-    document.getElementById('kredi-list-container').innerHTML =
-      '<div class="empty-state" style="padding:60px;"><div class="empty-icon">✅</div><p>Tüm krediler tamamlandı!</p>' +
-      '<button class="btn btn-outline" style="margin-top:12px;" onclick="krediFiltreDegistir(\'tumu\')">Tamamlananları Göster</button></div>';
-    return;
-  }
-
-  // Özet kartlar — doğru hesap
-  var topToplam  = krediler.reduce(function(s,k){return s+parseFloat(k.toplam||0);},0);
-  var topOdenen  = krediDetay.reduce(function(s,d){
-    return s + d.ilgili.reduce(function(ss,o){ return ss + odemeTutarBreakdown(o).odenen; }, 0);
-  },0);
-  var topKalan   = krediDetay.reduce(function(s,d){
-    return s + d.ilgili.reduce(function(ss,o){ return ss + odemeTutarBreakdown(o).kalan; }, 0);
-  },0);
-  // Taksit bilgisi olmayan krediler için toplam - odenen ile hesapla
-  if (topOdenen === 0) topOdenen = 0;
-  if (topKalan === 0) topKalan = topToplam - topOdenen;
-  var aktifSay   = krediDetay.filter(function(d){return d.aktif;}).length;
-  var tamSay     = krediDetay.filter(function(d){return !d.aktif;}).length;
-  var pct = topToplam > 0 ? Math.round((topOdenen/topToplam)*100) : 0;
+  var pct = topToplam > 0 ? Math.round((topOdenen / topToplam) * 100) : 0;
 
   var ozKartEl = document.getElementById('kredi-ozet-kartlar');
   if (ozKartEl) {
@@ -3958,7 +3939,7 @@ function renderKrediler() {
         '<div class="card" style="--accent-color:var(--c-red);">' +
           '<div class="card-label">Kalan Borç</div>' +
           '<div class="card-value red" style="font-size:20px;">' + fmtCurrency(topKalan) + '</div>' +
-          '<div class="card-sub">%' + (100-pct) + ' kaldı · ' + aktifSay + ' aktif kredi</div>' +
+          '<div class="card-sub">%' + (100 - pct) + ' kaldı · ' + aktifSay + ' aktif kredi</div>' +
         '</div>' +
         '<div class="card" style="--accent-color:var(--c-blue);">' +
           '<div class="card-label">Ödeme Durumu</div>' +
@@ -3967,10 +3948,21 @@ function renderKrediler() {
           '</div>' +
           '<div style="display:flex;justify-content:space-between;font-size:11px;">' +
             '<span style="color:#16a34a;font-weight:600;">%' + pct + ' Ödendi</span>' +
-            '<span style="color:#dc2626;font-weight:600;">%' + (100-pct) + ' Kaldı</span>' +
+            '<span style="color:#dc2626;font-weight:600;">%' + (100 - pct) + ' Kaldı</span>' +
           '</div>' +
         '</div>' +
       '</div>';
+  }
+
+  var gosterilecek = _krediFiltre === 'aktif'
+    ? krediDetay.filter(function(d){ return d.aktif; })
+    : krediDetay;
+
+  if (!gosterilecek.length) {
+    document.getElementById('kredi-list-container').innerHTML =
+      '<div class="empty-state" style="padding:60px;"><div class="empty-icon">✅</div><p>Tüm krediler tamamlandı!</p>' +
+      '<button class="btn btn-outline" style="margin-top:12px;" onclick="krediFiltreDegistir(\'tumu\')">Tamamlananları Göster</button></div>';
+    return;
   }
 
   var ozet = '<div style="font-size:12px;color:var(--muted);margin-bottom:12px;">' +
@@ -3991,13 +3983,15 @@ function renderKrediler() {
     var kalanTutar  = ilgili.reduce(function(s,o){
       return s + odemeTutarBreakdown(o).kalan;
     }, 0);
+    if (total > 0) kalanTutar = Math.min(kalanTutar, Math.max(0, total - odenenTutar));
     var pct = total ? Math.min(100, Math.round((odenenTutar/total)*100)) : (bekleyenler.length===0?100:0);
 
     var kalanSay  = bekleyenler.length;
     var taksitTutar = ilgili.length > 0 ? parseFloat(ilgili[0].tutar||0) : parseFloat(k.taksit||0);
+    var hataliTaksit = kalanSay > KREDI_MAX_TAKSIT;
 
-    var tamYazi  = kalanSay === 0 ? '✓ Tamamlandı' : kalanSay + ' taksit kaldı';
-    var tamRenk  = kalanSay === 0 ? '#16a34a' : '#ea580c';
+    var tamYazi  = kalanSay === 0 ? '✓ Tamamlandı' : (hataliTaksit ? '⚠ Hatalı taksit kayıtları (' + kalanSay + ')' : kalanSay + ' taksit kaldı');
+    var tamRenk  = kalanSay === 0 ? '#16a34a' : (hataliTaksit ? '#dc2626' : '#ea580c');
 
     // Taksit satırları
     var takHTML = ilgili.map(function(o, i) {
@@ -4831,6 +4825,9 @@ function renderNakit() {
 // ============================================================
 
 function openModal(id) {
+  document.querySelectorAll('.modal-overlay.open').forEach(function(el) {
+    if (el.id !== id) el.classList.remove('open');
+  });
   document.getElementById(id).classList.add('open');
 }
 
@@ -5069,40 +5066,66 @@ function clearOdemeForm() {
 // ============================================================
 
 function krediTaksitHesapla() {
-  var toplam  = parseFloat(document.getElementById('kredi-toplam').value) || 0;
-  var taksit  = parseFloat(document.getElementById('kredi-taksit').value) || 0;
-  var sayi    = parseInt(document.getElementById('kredi-kalan-taksit').value) || 0;
+  var toplam  = parseMoney(document.getElementById('kredi-toplam').value);
+  var taksit  = parseMoney(document.getElementById('kredi-taksit').value);
+  var sayi    = parseInt(document.getElementById('kredi-kalan-taksit').value, 10) || 0;
   var bilgi   = document.getElementById('kredi-hesap-bilgi');
   var text    = document.getElementById('kredi-hesap-text');
+
+  function uyari(msg) {
+    text.textContent = msg;
+    bilgi.style.display = 'block';
+    bilgi.style.background = '#fef2f2';
+    bilgi.style.borderColor = '#fca5a5';
+    bilgi.style.color = '#dc2626';
+  }
+  function bilgiOk(msg) {
+    text.textContent = msg;
+    bilgi.style.display = 'block';
+    bilgi.style.background = '#f0fdf4';
+    bilgi.style.borderColor = '#86efac';
+    bilgi.style.color = '#16a34a';
+  }
 
   // Eksik alanı hesapla
   if (toplam > 0 && taksit > 0 && sayi === 0) {
     var hesap = Math.ceil(toplam / taksit);
+    if (!krediTaksitSayisiUygun(hesap)) {
+      uyari('Hesaplanan taksit sayısı (' + hesap + ') çok yüksek — aylık taksit tutarını kontrol edin (max ' + KREDI_MAX_TAKSIT + ')');
+      return;
+    }
     document.getElementById('kredi-kalan-taksit').value = hesap;
-    text.textContent = toplam + ' ÷ ' + taksit + ' = ' + hesap + ' taksit otomatik hesaplandı';
-    bilgi.style.display = 'block';
+    bilgiOk(toplam + ' ÷ ' + taksit + ' = ' + hesap + ' taksit otomatik hesaplandı');
   } else if (toplam > 0 && sayi > 0 && taksit === 0) {
+    if (!krediTaksitSayisiUygun(sayi)) {
+      uyari('Taksit sayısı max ' + KREDI_MAX_TAKSIT + ' olabilir');
+      return;
+    }
     var hesap2 = Math.round(toplam / sayi);
     document.getElementById('kredi-taksit').value = hesap2;
-    text.textContent = toplam + ' ÷ ' + sayi + ' = ₺' + new Intl.NumberFormat('tr-TR').format(hesap2) + ' aylık taksit hesaplandı';
-    bilgi.style.display = 'block';
+    bilgiOk(toplam + ' ÷ ' + sayi + ' = ₺' + new Intl.NumberFormat('tr-TR').format(hesap2) + ' aylık taksit hesaplandı');
   } else if (taksit > 0 && sayi > 0 && toplam === 0) {
-    var hesap3 = taksit * sayi;
+    if (!krediTaksitSayisiUygun(sayi)) {
+      uyari('Taksit sayısı max ' + KREDI_MAX_TAKSIT + ' olabilir');
+      return;
+    }
+    var hesap3 = roundMoney(taksit * sayi);
     document.getElementById('kredi-toplam').value = hesap3;
-    text.textContent = taksit + ' × ' + sayi + ' = ₺' + new Intl.NumberFormat('tr-TR').format(hesap3) + ' toplam hesaplandı';
-    bilgi.style.display = 'block';
+    bilgiOk(taksit + ' × ' + sayi + ' = ₺' + new Intl.NumberFormat('tr-TR').format(hesap3) + ' toplam hesaplandı');
   } else {
     bilgi.style.display = 'none';
   }
 }
 
 function saveKredi() {
+  if (_krediSaving) return;
+
   var id           = document.getElementById('kredi-id').value;
   var ad           = document.getElementById('kredi-ad').value.trim();
   var tip          = document.getElementById('kredi-tip').value;
-  var toplam       = parseFloat(document.getElementById('kredi-toplam').value);
-  var taksit       = parseFloat(document.getElementById('kredi-taksit').value);
-  var kalan_taksit = parseInt(document.getElementById('kredi-kalan-taksit').value);
+  var toplam       = parseMoney(document.getElementById('kredi-toplam').value);
+  var taksit       = parseMoney(document.getElementById('kredi-taksit').value);
+  var kalan_taksit = parseInt(document.getElementById('kredi-kalan-taksit').value, 10) || 0;
   var gun          = document.getElementById('kredi-gun').value;
   var faiz         = document.getElementById('kredi-faiz').value;
   var banka        = document.getElementById('kredi-banka').value;
@@ -5110,8 +5133,21 @@ function saveKredi() {
   var not_         = document.getElementById('kredi-not').value;
   var para         = document.getElementById('kredi-para') ? document.getElementById('kredi-para').value : 'TL';
   var otomatik     = document.getElementById('kredi-otomatik-taksit') ? document.getElementById('kredi-otomatik-taksit').checked : false;
+  var kaydetBtn    = document.getElementById('kredi-kaydet-btn');
 
   if (!ad || !toplam) return alert('Kredi adı ve toplam borç zorunludur');
+
+  if (kalan_taksit && !krediTaksitSayisiUygun(kalan_taksit)) {
+    return alert('Taksit sayısı 1–' + KREDI_MAX_TAKSIT + ' arasında olmalıdır. Şu an: ' + kalan_taksit + '\n\nMuhtemelen aylık taksit tutarı yanlış girildi — önce taksit sayısını (ör. 12) girin.');
+  }
+
+  if (taksit > 0 && kalan_taksit > 0 && toplam > 0) {
+    var carpim = roundMoney(taksit * kalan_taksit);
+    var farkOran = Math.abs(carpim - toplam) / toplam;
+    if (farkOran > 0.2) {
+      if (!confirm('Taksit × Sayı = ' + fmtCurrency(carpim) + ' ama toplam borç = ' + fmtCurrency(toplam) + '.\n\nBu tutarsızlık binlerce hatalı taksit kaydı oluşturabilir. Yine de kaydetmek istiyor musunuz?')) return;
+    }
+  }
 
   // Otomatik taksit seçiliyse başlangıç tarihi gerekli ve geçerli olmalı
   if (otomatik && !id) {
@@ -5119,9 +5155,13 @@ function saveKredi() {
     var testDate = new Date(baslangic);
     if (isNaN(testDate.getTime())) return alert('Geçersiz taksit başlangıç tarihi. Lütfen tarihi düzeltin');
     if (!(taksit > 0)) return alert('Otomatik taksit için aylık taksit tutarı girilmelidir');
-    if (!(kalan_taksit > 0)) return alert('Otomatik taksit için taksit sayısı girilmelidir');
+    if (!krediTaksitSayisiUygun(kalan_taksit)) return alert('Otomatik taksit için geçerli taksit sayısı girilmelidir (max ' + KREDI_MAX_TAKSIT + ')');
   }
 
+  _krediSaving = true;
+  if (kaydetBtn) { kaydetBtn.disabled = true; kaydetBtn.textContent = 'Kaydediliyor...'; }
+
+  try {
   var payload = { entity: currentEntity, ad: ad, tip: tip, toplam: toplam, taksit: taksit||0,
     kalan_taksit: kalan_taksit||0, gun: gun, faiz: faiz, banka: banka, baslangic: baslangic,
     not: not_, para: para, kaydeden: currentUser ? currentUser.ad : '' };
@@ -5134,13 +5174,21 @@ function saveKredi() {
     krediRes = apiPost('/api/krediler', payload);
   }
 
+  if (!krediRes || !krediRes.ok) {
+    alert('Kredi kaydedilemedi. Lütfen tekrar deneyin.');
+    return;
+  }
+
   // Otomatik taksit oluşturma
   if (otomatik && !id && taksit > 0 && kalan_taksit > 0 && baslangic) {
     var basDate = new Date(baslangic);
     if (isNaN(basDate.getTime())) {
       alert('Taksit başlangıç tarihi geçersiz, taksitler oluşturulmadı.');
     } else {
-    var yeniKrediId = krediRes && krediRes.id ? krediRes.id : null;
+    var yeniKrediId = krediRes.id || null;
+    if (!yeniKrediId) {
+      alert('Kredi oluşturuldu ama taksitler bağlanamadı — lütfen krediyi düzenleyip taksitleri manuel ekleyin.');
+    } else {
     // Ay sonu güvenli tarih hesabı: min(başlangıç günü, hedef ayın son günü)
     function addAy(base, n) {
       var ay = base.getMonth() + n;
@@ -5167,12 +5215,17 @@ function saveKredi() {
     }
     alert(kalan_taksit + ' adet taksit ödeme kaydı oluşturuldu!');
     }
+    }
   }
 
   _cache.loaded = false;
   closeModal('kredi-modal');
   clearKrediForm();
   refreshAll();
+  } finally {
+    _krediSaving = false;
+    if (kaydetBtn) { kaydetBtn.disabled = false; kaydetBtn.textContent = '💾 Kaydet'; }
+  }
 }
 
 function editKredi(id) {
@@ -5186,11 +5239,9 @@ function editKredi(id) {
   document.getElementById('kredi-toplam').value = k.toplam || '';
   document.getElementById('kredi-taksit').value = k.taksit || '';
   // Gerçek bekleyen taksit sayısını odemeler'den hesapla; yoksa statik değeri kullan
-  var kAdLower = (k.ad || '').toLowerCase().trim();
-  var kalanGercek = kAdLower ? data.odemeler.filter(function(o) {
-    return o.tip === 'taksit' && o.durum !== 'odendi' &&
-      (o.aciklama || '').toLowerCase().indexOf(kAdLower + ' ') === 0;
-  }).length : 0;
+  var kalanGercek = data.odemeler.filter(function(o) {
+    return o.tip === 'taksit' && o.durum !== 'odendi' && krediTaksitEslestir(k, o, data.krediler);
+  }).length;
   document.getElementById('kredi-kalan-taksit').value = kalanGercek > 0 ? kalanGercek : (k.kalan_taksit || '');
   document.getElementById('kredi-gun').value = k.gun || '';
   document.getElementById('kredi-faiz').value = k.faiz || '';
@@ -5214,21 +5265,8 @@ function deleteKredi(id) {
     if (data.krediler[i].id === id) { kredi = data.krediler[i]; break; }
   }
   if (kredi) {
-    var digerKrediler = data.krediler.filter(function(k) { return k.id !== id; });
-    var kAd = (kredi.ad || '').toLowerCase().trim();
     var bagliTaksitler = data.odemeler.filter(function(o) {
-      if (o.tip !== 'taksit') return false;
-      // Yeni kayıtlar: kredi_id varsa doğrudan eşleştir
-      if (o.kredi_id) return o.kredi_id === id;
-      // Eski kayıtlar: isim prefix
-      var oAc = (o.aciklama || '').toLowerCase().trim();
-      if (oAc.indexOf(kAd + ' ') !== 0) return false;
-      // Daha spesifik başka bir kredi bu taksiti sahipleniyor mu?
-      for (var j = 0; j < digerKrediler.length; j++) {
-        var dAd = (digerKrediler[j].ad || '').toLowerCase().trim();
-        if (oAc.indexOf(dAd + ' ') === 0 && dAd.length > kAd.length) return false;
-      }
-      return true;
+      return krediTaksitEslestir(kredi, o, data.krediler);
     });
     bagliTaksitler.forEach(function(o) { apiDelete('/api/odemeler/' + o.id); });
   }
@@ -5595,7 +5633,7 @@ function doLogout() {
 
 function showLogin() {
   currentUser = null;
-  _cache = { odemeler: [], krediler: [], loaded: false };
+  _cache = { odemeler: [], krediler: [], tahsilatlar: [], odemeKayitlari: [], loaded: false };
   _planCache = [];
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-username').value = '';
