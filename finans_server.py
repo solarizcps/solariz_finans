@@ -646,10 +646,16 @@ def update_kredi(kid):
 @app.route('/api/krediler/<kid>', methods=['DELETE'])
 def delete_kredi(kid):
     conn = get_db()
+    oids = [r['id'] for r in conn.execute(
+        "SELECT id FROM odemeler WHERE kredi_id=?", (kid,)
+    ).fetchall()]
+    for oid in oids:
+        conn.execute("DELETE FROM odeme_kayitlari WHERE odeme_id=?", (oid,))
+    conn.execute("DELETE FROM odemeler WHERE kredi_id=?", (kid,))
     conn.execute("DELETE FROM krediler WHERE id=?", (kid,))
     conn.commit()
     conn.close()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'deleted_taksit': len(oids)})
 
 # ============================================================
 # PLANLAMA

@@ -2381,23 +2381,32 @@ function tahsilatTutarBreakdown(t) {
 
 
 
+function refreshTab(tab) {
+  tab = tab || currentTab || 'ozet';
+  switch (tab) {
+    case 'ozet':
+      renderSummaryCards();
+      renderBorcOzeti();
+      renderUpcoming();
+      renderCreditSummary();
+      renderMonthlyChart();
+      break;
+    case 'odemeler': renderOdemeler(); break;
+    case 'krediler': renderKrediler(); break;
+    case 'cekler': renderCekler(); break;
+    case 'kasa': renderKasa(); break;
+    case 'takvim': renderCalendar(); break;
+    case 'nakit': renderNakit(); break;
+    case 'planlama': renderPlanlama(); break;
+    case 'tahsilatlar': renderTahsilatlar(); break;
+  }
+}
+
 function refreshAll() {
   document.querySelectorAll('.modal-overlay.open').forEach(function(el) { el.classList.remove('open'); });
   loadKurlar();
   renderAlerts();
-  renderSummaryCards();
-  renderBorcOzeti();
-  renderUpcoming();
-  renderCreditSummary();
-  renderMonthlyChart();
-  renderOdemeler();
-  renderKrediler();
-  renderCekler();
-  renderKasa();
-  renderCalendar();
-  renderNakit();
-  renderPlanlama();
-  renderTahsilatlar();
+  refreshTab(currentTab);
 }
 
 // ============================================================
@@ -3831,7 +3840,9 @@ function markTahsilOnay() {
 
 var _krediFiltre = 'aktif';
 var KREDI_MAX_TAKSIT = 360;
+var TAKSIT_TABLO_LIMIT = 120;
 var _krediSaving = false;
+var _krediTaksitDetayCache = {};
 
 function krediAdNorm(ad) {
   return (ad || '').toLowerCase().trim();
@@ -3857,6 +3868,95 @@ function krediTaksitEslestir(kredi, odeme, tumKrediler) {
 
 function krediTaksitSayisiUygun(sayi) {
   return sayi > 0 && sayi <= KREDI_MAX_TAKSIT;
+}
+
+function buildKrediOdemeIndex(odemeler, krediler) {
+  var byKredi = {};
+  krediler.forEach(function(k) { byKredi[k.id] = []; });
+  var legacy = [];
+  (odemeler || []).forEach(function(o) {
+    if (o.tip !== 'taksit') return;
+    if (o.kredi_id && byKredi[o.kredi_id] !== undefined) {
+      byKredi[o.kredi_id].push(o);
+    } else {
+      legacy.push(o);
+    }
+  });
+  if (legacy.length) {
+    legacy.forEach(function(o) {
+      for (var i = 0; i < krediler.length; i++) {
+        if (krediTaksitEslestir(krediler[i], o, krediler)) {
+          byKredi[krediler[i].id].push(o);
+          break;
+        }
+      }
+    });
+  }
+  Object.keys(byKredi).forEach(function(kid) {
+    byKredi[kid].sort(function(a, b) {
+      return (a.vade || '') > (b.vade || '') ? 1 : -1;
+    });
+  });
+  return byKredi;
+}
+
+function buildKrediTaksitRowHTML(o, i) {
+  var b = odemeTutarBreakdown(o);
+  var bg   = o.durum==='odendi' ? '#f0fdf4' : o.durum==='gecikti' ? '#fef2f2' : (b.odenen > 0 ? '#eff6ff' : '#ffffff');
+  var clr  = o.durum==='odendi' ? '#16a34a' : o.durum==='gecikti' ? '#dc2626' : (b.odenen > 0 ? '#2563eb' : '#ea580c');
+  var ico  = o.durum==='odendi' ? '✓' : o.durum==='gecikti' ? '!' : (b.odenen > 0 ? '◑' : '⏳');
+  var dYaz = o.durum==='odendi' ? 'Ödendi' : o.durum==='gecikti' ? 'Gecikti' : (b.odenen > 0 ? 'Kısmi' : 'Bekliyor');
+  var takBanka = (o.banka && o.banka.trim()) ? o.banka.trim() : ((o.not_ && o.not_.trim()) ? o.not_.trim() : '');
+  var tutarHtml = b.odenen > 0 && o.durum !== 'odendi'
+    ? '<div style="font-size:13px;font-weight:700;color:#1a1d2e;">' + fmtCurrency(b.kalan) + ' <span style="font-size:10px;color:var(--muted);font-weight:500;">kalan</span></div>' +
+      '<div style="font-size:10px;color:#16a34a;">Ödenen: ' + fmtCurrency(b.odenen) + ' / ' + fmtCurrency(b.ilk) + '</div>'
+    : '<div style="font-size:13px;font-weight:700;color:#1a1d2e;">' + fmtCurrency(b.ilk) + '</div>';
+  return '<tr style="background:' + bg + ';border-bottom:1px solid #e8eaf0;">' +
+    '<td style="padding:9px 16px;font-size:12px;color:#6b7280;font-weight:600;width:90px;">' + (i+1) + '. Taksit</td>' +
+    '<td style="padding:9px 16px;font-size:12px;color:#1a1d2e;">' + (o.vade||'-') + '</td>' +
+    '<td style="padding:9px 16px;">' + tutarHtml + '</td>' +
+    '<td style="padding:9px 16px;font-size:11px;">' +
+      (takBanka ? '<span style="background:#eff6ff;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:600;">' + takBanka + '</span>' : '<span style="color:#d0d4e0;">—</span>') +
+    '</td>' +
+    '<td style="padding:9px 16px;font-size:12px;">' +
+      (o.odeme_tarihi ? '<span style="color:#6b7280;font-size:11px;">' + o.odeme_tarihi + '</span>' : '') +
+    '</td>' +
+    '<td style="padding:9px 16px;">' +
+      '<span style="font-size:11px;font-weight:700;color:' + clr + ';">' + ico + ' ' + dYaz + '</span>' +
+    '</td>' +
+    '<td style="padding:9px 16px;text-align:right;white-space:nowrap;">' +
+      (o.durum !== 'odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');reloadCache();renderKrediler();" style="font-size:11px;margin-right:4px;">✓ Öde</button>' : '') +
+      '<button class="btn btn-xs btn-outline" onclick="editTaksit(\'' + o.id + '\')" title="Düzenle" style="font-size:11px;">✏</button>' +
+    '</td>' +
+  '</tr>' + odemeKayitSubRows(o.id);
+}
+
+function buildKrediTaksitTableHTML(k, ilgili, total, odenenTutar, kalanTutar) {
+  var truncated = ilgili.length > TAKSIT_TABLO_LIMIT;
+  var show = truncated ? ilgili.slice(0, TAKSIT_TABLO_LIMIT) : ilgili;
+  var takHTML = show.map(function(o, i) { return buildKrediTaksitRowHTML(o, i); }).join('');
+  if (truncated) {
+    takHTML += '<tr><td colspan="7" style="padding:16px;text-align:center;background:#fef2f2;color:#dc2626;font-size:12px;font-weight:600;">' +
+      '⚠ ' + ilgili.length + ' taksit kaydı var — ilk ' + TAKSIT_TABLO_LIMIT + ' gösteriliyor. Hatalı kayıtlar için krediyi ✕ ile silin.</td></tr>';
+  }
+  return '<table style="width:100%;border-collapse:collapse;background:#fff;">' +
+    '<thead><tr style="background:#f8f9fc;border-bottom:2px solid #e8eaf0;">' +
+      '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">No</th>' +
+      '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Tarih</th>' +
+      '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Taksit Tutarı</th>' +
+      '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Banka</th>' +
+      '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Ödeme Tarihi</th>' +
+      '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Durum</th>' +
+      '<th></th>' +
+    '</tr></thead>' +
+    '<tbody>' + takHTML + '</tbody>' +
+    '<tfoot><tr style="background:#fef9c3;border-top:2px solid #e8eaf0;">' +
+      '<td colspan="2" style="padding:10px 16px;font-size:12px;font-weight:700;">TOPLAM</td>' +
+      '<td style="padding:10px 16px;font-size:13px;font-weight:800;color:#1a1d2e;">' + fmtCurrency(total) + '</td>' +
+      '<td style="padding:10px 16px;font-size:12px;font-weight:700;color:#16a34a;">Ödenen: ' + fmtCurrency(odenenTutar) + '</td>' +
+      '<td colspan="2" style="padding:10px 16px;font-size:12px;font-weight:700;color:#ea580c;">Kalan: ' + fmtCurrency(kalanTutar) + '</td>' +
+    '</tr></tfoot>' +
+  '</table>';
 }
 
 function krediGlobalOzet(krediDetay, krediler) {
@@ -3901,15 +4001,15 @@ function krediFiltreDegistir(filtre) {
 
 function renderKrediler() {
   var _tmp_ = entityData(); var krediler = _tmp_.krediler; var odemeler = _tmp_.odemeler;
+  _krediTaksitDetayCache = {};
   if (!krediler.length) {
     document.getElementById('kredi-list-container').innerHTML = '<div class="empty-state" style="padding:60px;"><div class="empty-icon">🏦</div><p>Henüz kredi girilmedi</p></div>';
     return;
   }
 
-  // Önce tüm kredilerin kalan taksitini hesapla, sonra filtrele
+  var odemeIndex = buildKrediOdemeIndex(odemeler, krediler);
   var krediDetay = krediler.map(function(k) {
-    var ilgili = odemeler.filter(function(o){ return krediTaksitEslestir(k, o, krediler); })
-      .sort(function(a,b){ return (a.vade||'') > (b.vade||'') ? 1 : -1; });
+    var ilgili = odemeIndex[k.id] || [];
     var bekleyenler = ilgili.filter(function(o){ return o.durum !== 'odendi'; });
     return { k: k, ilgili: ilgili, bekleyenler: bekleyenler, aktif: bekleyenler.length > 0 };
   });
@@ -3993,58 +4093,13 @@ function renderKrediler() {
     var tamYazi  = kalanSay === 0 ? '✓ Tamamlandı' : (hataliTaksit ? '⚠ Hatalı taksit kayıtları (' + kalanSay + ')' : kalanSay + ' taksit kaldı');
     var tamRenk  = kalanSay === 0 ? '#16a34a' : (hataliTaksit ? '#dc2626' : '#ea580c');
 
-    // Taksit satırları
-    var takHTML = ilgili.map(function(o, i) {
-      var b = odemeTutarBreakdown(o);
-      var bg   = o.durum==='odendi' ? '#f0fdf4' : o.durum==='gecikti' ? '#fef2f2' : (b.odenen > 0 ? '#eff6ff' : '#ffffff');
-      var clr  = o.durum==='odendi' ? '#16a34a' : o.durum==='gecikti' ? '#dc2626' : (b.odenen > 0 ? '#2563eb' : '#ea580c');
-      var ico  = o.durum==='odendi' ? '✓' : o.durum==='gecikti' ? '!' : (b.odenen > 0 ? '◑' : '⏳');
-      var dYaz = o.durum==='odendi' ? 'Ödendi' : o.durum==='gecikti' ? 'Gecikti' : (b.odenen > 0 ? 'Kısmi' : 'Bekliyor');
-      var takBanka = (o.banka && o.banka.trim()) ? o.banka.trim() : ((o.not_ && o.not_.trim()) ? o.not_.trim() : '');
-      var tutarHtml = b.odenen > 0 && o.durum !== 'odendi'
-        ? '<div style="font-size:13px;font-weight:700;color:#1a1d2e;">' + fmtCurrency(b.kalan) + ' <span style="font-size:10px;color:var(--muted);font-weight:500;">kalan</span></div>' +
-          '<div style="font-size:10px;color:#16a34a;">Ödenen: ' + fmtCurrency(b.odenen) + ' / ' + fmtCurrency(b.ilk) + '</div>'
-        : '<div style="font-size:13px;font-weight:700;color:#1a1d2e;">' + fmtCurrency(b.ilk) + '</div>';
-      return '<tr style="background:' + bg + ';border-bottom:1px solid #e8eaf0;">' +
-        '<td style="padding:9px 16px;font-size:12px;color:#6b7280;font-weight:600;width:90px;">' + (i+1) + '. Taksit</td>' +
-        '<td style="padding:9px 16px;font-size:12px;color:#1a1d2e;">' + (o.vade||'-') + '</td>' +
-        '<td style="padding:9px 16px;">' + tutarHtml + '</td>' +
-        '<td style="padding:9px 16px;font-size:11px;">' +
-          (takBanka ? '<span style="background:#eff6ff;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:600;">' + takBanka + '</span>' : '<span style="color:#d0d4e0;">—</span>') +
-        '</td>' +
-        '<td style="padding:9px 16px;font-size:12px;">' +
-          (o.odeme_tarihi ? '<span style="color:#6b7280;font-size:11px;">' + o.odeme_tarihi + '</span>' : '') +
-        '</td>' +
-        '<td style="padding:9px 16px;">' +
-          '<span style="font-size:11px;font-weight:700;color:' + clr + ';">' + ico + ' ' + dYaz + '</span>' +
-        '</td>' +
-        '<td style="padding:9px 16px;text-align:right;white-space:nowrap;">' +
-          (o.durum !== 'odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');reloadCache();renderKrediler();" style="font-size:11px;margin-right:4px;">✓ Öde</button>' : '') +
-          '<button class="btn btn-xs btn-outline" onclick="editTaksit(\'' + o.id + '\')" title="Düzenle" style="font-size:11px;">✏</button>' +
-        '</td>' +
-      '</tr>' + odemeKayitSubRows(o.id);
-    }).join('');
+    _krediTaksitDetayCache[k.id] = {
+      k: k, ilgili: ilgili, total: total, odenenTutar: odenenTutar, kalanTutar: kalanTutar
+    };
 
-    var takTabloHTML = '<div id="tak_' + k.id + '" style="display:none;">' +
+    var takTabloHTML = '<div id="tak_' + k.id + '" data-lazy="1" style="display:none;">' +
       (ilgili.length > 0 ?
-        '<table style="width:100%;border-collapse:collapse;background:#fff;">' +
-          '<thead><tr style="background:#f8f9fc;border-bottom:2px solid #e8eaf0;">' +
-            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">No</th>' +
-            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Tarih</th>' +
-            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Taksit Tutarı</th>' +
-            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Banka</th>' +
-            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Ödeme Tarihi</th>' +
-            '<th style="padding:8px 16px;text-align:left;font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:700;">Durum</th>' +
-            '<th></th>' +
-          '</tr></thead>' +
-          '<tbody>' + takHTML + '</tbody>' +
-          '<tfoot><tr style="background:#fef9c3;border-top:2px solid #e8eaf0;">' +
-            '<td colspan="2" style="padding:10px 16px;font-size:12px;font-weight:700;">TOPLAM</td>' +
-            '<td style="padding:10px 16px;font-size:13px;font-weight:800;color:#1a1d2e;">' + fmtCurrency(total) + '</td>' +
-            '<td style="padding:10px 16px;font-size:12px;font-weight:700;color:#16a34a;">Ödenen: ' + fmtCurrency(odenenTutar) + '</td>' +
-            '<td colspan="2" style="padding:10px 16px;font-size:12px;font-weight:700;color:#ea580c;">Kalan: ' + fmtCurrency(kalanTutar) + '</td>' +
-          '</tr></tfoot>' +
-        '</table>'
+        '<div style="padding:14px 18px;color:var(--muted);font-size:12px;background:#fafbfc;border-top:1px solid #f1f5f9;">Taksit listesi açılınca yüklenecek (' + ilgili.length + ' kayıt)</div>'
         :
         '<div style="padding:14px 18px;color:var(--muted);font-size:13px;background:#fafbfc;border-top:1px solid #f1f5f9;">' +
           '📋 Bu kredi için taksit kaydı bulunamadı. ' +
@@ -4093,7 +4148,15 @@ function toggleTaksit(kid) {
   var div = document.getElementById('tak_' + kid);
   var ico = document.getElementById('takico_' + kid);
   if (!div) return;
-  if (div.style.display === 'none') {
+  var opening = (div.style.display === 'none' || !div.style.display);
+  if (opening) {
+    if (div.getAttribute('data-lazy') === '1') {
+      var det = _krediTaksitDetayCache[kid];
+      if (det && det.ilgili.length > 0) {
+        div.innerHTML = buildKrediTaksitTableHTML(det.k, det.ilgili, det.total, det.odenenTutar, det.kalanTutar);
+      }
+      div.removeAttribute('data-lazy');
+    }
     div.style.display = 'block';
     if (ico) ico.textContent = '▲';
   } else {
@@ -5258,17 +5321,16 @@ function editKredi(id) {
 function deleteKredi(id) {
   if (!confirm('Bu krediyi silmek istediğinize emin misiniz?\nBağlı taksit kayıtları da silinecektir.')) return;
 
-  // Cascade: bu krediye ait taksit ödemelerini de sil
   var data = loadData();
   var kredi = null;
   for (var i = 0; i < data.krediler.length; i++) {
     if (data.krediler[i].id === id) { kredi = data.krediler[i]; break; }
   }
   if (kredi) {
-    var bagliTaksitler = data.odemeler.filter(function(o) {
-      return krediTaksitEslestir(kredi, o, data.krediler);
+    var legacyOrphans = data.odemeler.filter(function(o) {
+      return o.tip === 'taksit' && !o.kredi_id && krediTaksitEslestir(kredi, o, data.krediler);
     });
-    bagliTaksitler.forEach(function(o) { apiDelete('/api/odemeler/' + o.id); });
+    legacyOrphans.forEach(function(o) { apiDelete('/api/odemeler/' + o.id); });
   }
 
   apiDelete('/api/krediler/' + id);
