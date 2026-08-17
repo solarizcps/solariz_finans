@@ -105,6 +105,18 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO kullanicilar VALUES ('altan','104099','Altan','admin')")
     c.execute("INSERT OR IGNORE INTO kullanicilar VALUES ('adem','f7a6ua61','Adem','admin')")
 
+    # Migration: banka / cek_no (mevcut DB'lerde yoksa ekle)
+    try:
+        c.execute("ALTER TABLE odemeler ADD COLUMN banka TEXT")
+        print("[DB] odemeler.banka sütunu eklendi")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE odemeler ADD COLUMN cek_no TEXT")
+        print("[DB] odemeler.cek_no sütunu eklendi")
+    except Exception:
+        pass
+
     # Migration: kredi_id alanı (mevcut DB'lerde yoksa ekle)
     try:
         c.execute("ALTER TABLE odemeler ADD COLUMN kredi_id TEXT")
@@ -116,6 +128,18 @@ def init_db():
     try:
         c.execute("ALTER TABLE odemeler ADD COLUMN odenen_tutar REAL DEFAULT 0")
         print("[DB] odemeler.odenen_tutar sütunu eklendi")
+    except Exception:
+        pass
+
+    # Migration: kredi kartı asgari + devreden borç
+    try:
+        c.execute("ALTER TABLE odemeler ADD COLUMN asgari_tutar REAL DEFAULT 0")
+        print("[DB] odemeler.asgari_tutar sütunu eklendi")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE odemeler ADD COLUMN devreden_from_id TEXT")
+        print("[DB] odemeler.devreden_from_id sütunu eklendi")
     except Exception:
         pass
 
@@ -173,29 +197,109 @@ def init_db():
     conn.close()
     print(f"[DB] Veritabanı hazır: {DB_PATH}")
 
-def sync_odeme_odenen(conn, oid):
-    row = conn.execute("SELECT tutar, durum FROM odemeler WHERE id=?", (oid,)).fetchone()
-    if not row:
-        return
-    toplam = float(row['tutar'] or 0)
-    odenen = conn.execute(
+TOLERANCE = 0.01
+
+def add_ay_vade(vade_str):
+    """Bir ay sonrası vade (ay sonu güvenli)."""
+    if not vade_str:
+        return vade_str
+    try:
+        y, m, d = [int(x) for x in str(vade_str).split('-')[:3]]
+        if m == 12:
+            ny, nm = y + 1, 1
+        else:
+            ny, nm = y, m + 1
+        import calendar
+        nd = min(d, calendar.monthrange(ny, nm)[1])
+        return f"{ny:04d}-{nm:02d}-{nd:02d}"
+    except Exception:
+        return vade_str
+
+def _odeme_odenen_toplam(conn, oid):
+    return float(conn.execute(
         "SELECT COALESCE(SUM(tutar),0) FROM odeme_kayitlari WHERE odeme_id=?", (oid,)
-    ).fetchone()[0] or 0
+    ).fetchone()[0] or 0)
+
+def ensure_kk_devir(conn, oid, row, odenen):
+    """Asgari ödendi durumunda devreden borç satırı (duplicate guard)."""
+    toplam = float(row['tutar'] or 0)
+    kalan = round(toplam - odenen, 2)
+    if kalan <= TOLERANCE:
+        return None
+    existing = conn.execute(
+        "SELECT id FROM odemeler WHERE devreden_from_id=?", (oid,)
+    ).fetchone()
+    if existing:
+        return existing['id']
+    new_id = str(uuid.uuid4())[:10]
+    new_vade = add_ay_vade(row['vade'] or '')
+    conn.execute('''INSERT INTO odemeler
+        (id,entity,aciklama,tip,tutar,para,vade,odeme_tarihi,durum,tekrar,not_,kaydeden,kayit_tarihi,
+         banka,cek_no,kredi_id,odenen_tutar,asgari_tutar,devreden_from_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (new_id, row['entity'], row['aciklama'], 'kredi-karti', kalan,
+         row['para'] or 'TL', new_vade, '', 'bekliyor', row['tekrar'] or 'tek',
+         'Önceki dönemden devreden bakiye', row['kaydeden'] or '',
+         datetime.now().isoformat(), row['banka'], row['cek_no'],
+         None, 0, 0, oid))
+    return new_id
+
+def _clear_kk_devir_if_needed(conn, oid, durum):
+    """Asgari ödendi dışına düşünce bağlı devreden satırı kaldır."""
+    if durum == 'asgari_odendi':
+        return
+    conn.execute(
+        "DELETE FROM odemeler WHERE devreden_from_id=? AND COALESCE(odenen_tutar,0) <= ?",
+        (oid, TOLERANCE)
+    )
+
+def sync_odeme_odenen(conn, oid):
+    row = conn.execute("SELECT * FROM odemeler WHERE id=?", (oid,)).fetchone()
+    if not row:
+        return None
+    toplam = float(row['tutar'] or 0)
+    odenen = _odeme_odenen_toplam(conn, oid)
     odenen = min(toplam, max(0, float(odenen)))
-    durum = row['durum'] or 'bekliyor'
-    if odenen >= toplam - 0.01:
-        durum = 'odendi'
-    elif odenen > 0 and durum != 'gecikti':
-        durum = 'bekliyor'
+    tip = row['tip'] or ''
+    asgari = float(row['asgari_tutar'] or 0)
+    prev_durum = row['durum'] or 'bekliyor'
+    gecikti = prev_durum == 'gecikti'
+
+    if tip == 'kredi-karti':
+        if odenen >= toplam - TOLERANCE:
+            durum = 'odendi'
+        elif (asgari > TOLERANCE and odenen >= asgari - TOLERANCE
+              and odenen < toplam - TOLERANCE):
+            durum = 'asgari_odendi'
+        elif odenen > 0:
+            durum = 'gecikti' if gecikti else 'bekliyor'
+        else:
+            durum = 'gecikti' if gecikti else 'bekliyor'
+        _clear_kk_devir_if_needed(conn, oid, durum)
+        devreden_id = None
+        if durum == 'asgari_odendi':
+            devreden_id = ensure_kk_devir(conn, oid, row, odenen)
+    else:
+        if odenen >= toplam - TOLERANCE:
+            durum = 'odendi'
+        elif odenen > 0 and not gecikti:
+            durum = 'bekliyor'
+        elif gecikti:
+            durum = 'gecikti'
+        else:
+            durum = 'bekliyor'
+        devreden_id = None
+
     son = conn.execute(
         "SELECT tarih FROM odeme_kayitlari WHERE odeme_id=? ORDER BY tarih DESC, kayit_tarihi DESC LIMIT 1",
         (oid,)
     ).fetchone()
-    odeme_tarihi = son['tarih'] if son else ''
+    odeme_tarihi = son['tarih'] if son else (row['odeme_tarihi'] or '')
     conn.execute(
         "UPDATE odemeler SET odenen_tutar=?, durum=?, odeme_tarihi=? WHERE id=?",
         (odenen, durum, odeme_tarihi, oid)
     )
+    return {'durum': durum, 'odenen_tutar': odenen, 'kalan': max(0, toplam - odenen), 'devreden_id': devreden_id}
 
 # ============================================================
 # AUTH
@@ -364,16 +468,18 @@ def get_odemeler():
 def add_odeme():
     d = request.json
     oid = d.get('id') or str(uuid.uuid4())[:10]
+    asgari = float(d.get('asgari_tutar', 0) or 0)
     conn = get_db()
     conn.execute('''INSERT OR REPLACE INTO odemeler
-        (id,entity,aciklama,tip,tutar,para,vade,odeme_tarihi,durum,tekrar,not_,kaydeden,kayit_tarihi,banka,cek_no,kredi_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (id,entity,aciklama,tip,tutar,para,vade,odeme_tarihi,durum,tekrar,not_,kaydeden,kayit_tarihi,
+         banka,cek_no,kredi_id,asgari_tutar,devreden_from_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (oid, d.get('entity'), d.get('aciklama'), d.get('tip'), d.get('tutar',0),
          d.get('para','TL'), d.get('vade'), d.get('odeme_tarihi',''),
          d.get('durum','bekliyor'), d.get('tekrar','tek'),
          d.get('not',''), d.get('kaydeden'), datetime.now().isoformat(),
          d.get('banka','') or None, d.get('cek_no','') or None,
-         d.get('kredi_id') or None))
+         d.get('kredi_id') or None, asgari, d.get('devreden_from_id') or None))
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'id': oid})
@@ -382,27 +488,40 @@ def add_odeme():
 def update_odeme(oid):
     d = request.json
     conn = get_db()
-    row = conn.execute("SELECT odenen_tutar FROM odemeler WHERE id=?", (oid,)).fetchone()
+    existing = conn.execute("SELECT * FROM odemeler WHERE id=?", (oid,)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Kayıt bulunamadı'}), 404
     tutar = float(d.get('tutar', 0) or 0)
+    req_durum = d.get('durum', 'bekliyor')
+    if existing['tip'] == 'kredi-karti' and req_durum == 'odendi':
+        odenen = _odeme_odenen_toplam(conn, oid)
+        if odenen < tutar - TOLERANCE:
+            conn.close()
+            return jsonify({'ok': False, 'mesaj': 'Kredi kartı tam ödenmeden odendi yapılamaz'}), 400
+    asgari = float(d.get('asgari_tutar', existing['asgari_tutar'] or 0) or 0)
 
     conn.execute('''UPDATE odemeler SET
         entity=?, aciklama=?, tip=?, tutar=?, para=?, vade=?, odeme_tarihi=?,
         durum=?, tekrar=?, not_=?, guncelleyen=?, guncelleme=?,
-        banka=?, cek_no=?, kredi_id=COALESCE(?,kredi_id)
+        banka=?, cek_no=?, kredi_id=COALESCE(?,kredi_id), asgari_tutar=?
         WHERE id=?''',
         (d.get('entity'), d.get('aciklama'), d.get('tip'), tutar, d.get('para','TL'),
-         d.get('vade'), d.get('odeme_tarihi',''), d.get('durum','bekliyor'),
+         d.get('vade'), d.get('odeme_tarihi',''), req_durum,
          d.get('tekrar','tek'), d.get('not',''),
          d.get('guncelleyen'), datetime.now().isoformat(),
          d.get('banka','') or None, d.get('cek_no','') or None,
-         d.get('kredi_id') or None, oid))
-    sync_odeme_odenen(conn, oid)
+         d.get('kredi_id') or None, asgari, oid))
+    sync_result = sync_odeme_odenen(conn, oid)
     row2 = conn.execute("SELECT odenen_tutar, durum FROM odemeler WHERE id=?", (oid,)).fetchone()
     conn.commit()
     conn.close()
     odenen = float(row2['odenen_tutar'] or 0) if row2 else 0
-    durum = row2['durum'] if row2 else d.get('durum', 'bekliyor')
-    return jsonify({'ok': True, 'durum': durum, 'odenen_tutar': odenen, 'kalan': max(0, tutar - odenen)})
+    durum = row2['durum'] if row2 else req_durum
+    resp = {'ok': True, 'durum': durum, 'odenen_tutar': odenen, 'kalan': max(0, tutar - odenen)}
+    if sync_result and sync_result.get('devreden_id'):
+        resp['devreden_id'] = sync_result['devreden_id']
+    return jsonify(resp)
 
 @app.route('/api/odemeler/<oid>', methods=['DELETE'])
 def delete_odeme(oid):
@@ -459,11 +578,15 @@ def mark_odendi(oid):
     not_  = d.get('not') or d.get('not_') or ''
     conn = get_db()
     row = conn.execute(
-        "SELECT tutar, odenen_tutar FROM odemeler WHERE id=?", (oid,)
+        "SELECT tutar, odenen_tutar, durum, tip FROM odemeler WHERE id=?", (oid,)
     ).fetchone()
     if not row:
         conn.close()
         return jsonify({'ok': False, 'mesaj': 'Kayıt bulunamadı'}), 404
+
+    if row['tip'] == 'kredi-karti' and row['durum'] == 'asgari_odendi':
+        conn.close()
+        return jsonify({'ok': False, 'mesaj': 'Kalan borç devreden satıra taşındı; oradan ödeyin'}), 400
 
     toplam = float(row['tutar'] or 0)
     mevcut = float(row['odenen_tutar'] or 0)
@@ -487,13 +610,19 @@ def mark_odendi(oid):
         (kid, oid, round(odeme_miktari, 2), tarih, not_,
          d.get('kaydeden', ''), datetime.now().isoformat())
     )
-    sync_odeme_odenen(conn, oid)
+    sync_result = sync_odeme_odenen(conn, oid)
     yeni_row = conn.execute("SELECT odenen_tutar, durum FROM odemeler WHERE id=?", (oid,)).fetchone()
     conn.commit()
     conn.close()
     yeni_odenen = float(yeni_row['odenen_tutar'] or 0)
     durum = yeni_row['durum']
-    return jsonify({'ok': True, 'durum': durum, 'odenen_tutar': yeni_odenen, 'kalan': max(0, toplam - yeni_odenen), 'kayit_id': kid})
+    resp = {
+        'ok': True, 'durum': durum, 'odenen_tutar': yeni_odenen,
+        'kalan': max(0, toplam - yeni_odenen), 'kayit_id': kid
+    }
+    if sync_result and sync_result.get('devreden_id'):
+        resp['devreden_id'] = sync_result['devreden_id']
+    return jsonify(resp)
 
 # ============================================================
 # TAHSİLATLAR

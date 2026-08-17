@@ -2328,6 +2328,28 @@ function odemeTutarBreakdown(o) {
   return { ilk: ilk, odenen: odenen, kalan: kalan, para: o.para || 'TL' };
 }
 
+/** Aktif borç hesabında kullanılacak kalan (asgari_odendi devredildi). */
+function odemeAktifKalan(o) {
+  if (!o) return 0;
+  if (o.durum === 'odendi' || o.durum === 'asgari_odendi') return 0;
+  return odemeTutarBreakdown(o).kalan;
+}
+
+function kkAsgariTutar(o) {
+  return parseFloat(o.asgari_tutar || 0);
+}
+
+function kkKalanAsgari(o) {
+  var asgari = kkAsgariTutar(o);
+  if (asgari <= 0) return 0;
+  var b = odemeTutarBreakdown(o);
+  return Math.max(0, roundMoney(asgari - b.odenen));
+}
+
+function odemeOdenmemisMi(o) {
+  return o && o.durum !== 'odendi' && o.durum !== 'asgari_odendi';
+}
+
 function tutarBreakdownHtml(o) {
   var b = odemeTutarBreakdown(o);
   return '<div style="font-size:10px;line-height:1.55;margin-top:4px;">' +
@@ -2339,7 +2361,7 @@ function tutarBreakdownHtml(o) {
 
 function getUpcomingOdemeler(odemeler, tipF) {
   return sortOdemelerByVade(odemeler.filter(function(o) {
-    if (o.durum === 'odendi') return false;
+    if (!odemeOdenmemisMi(o)) return false;
     var d = daysUntil(o.vade);
     return d !== null && d <= 30;
   }).filter(function(o) {
@@ -2354,6 +2376,9 @@ function genId() {
 }
 
 function statusBadge(durum, o) {
+  if (durum === 'asgari_odendi') {
+    return '<span class="badge" style="background:#fef3c7;color:#b45309;border:1px solid #fcd34d;font-weight:700;">◆ ASGARİ ÖDENDİ</span>';
+  }
   var odenen = o ? parseFloat(o.odenen_tutar || o.tahsil_edilen_tutar || 0) : 0;
   if (durum === 'odendi' || durum === 'tahsil_edildi') return '<span class="badge badge-green">✓ ' + (durum === 'tahsil_edildi' ? 'Tahsil Edildi' : 'Ödendi') + '</span>';
   if (odenen > 0) return '<span class="badge badge-blue">◑ Kısmi ' + (o && o.tahsil_edilen_tutar !== undefined ? 'Tahsil' : 'Ödendi') + '</span>';
@@ -3001,11 +3026,11 @@ function showAlertModal(tip) {
   var _tmp_ = entityData(); var odemeler = _tmp_.odemeler;
   var liste, baslik;
   if (tip === 'gecikti') {
-    liste = odemeler.filter(function(o){ return o.durum !== 'odendi' && daysUntil(o.vade) < 0; })
+    liste = odemeler.filter(function(o){ return odemeOdenmemisMi(o) && daysUntil(o.vade) < 0; })
                     .sort(function(a,b){ return new Date(a.vade)-new Date(b.vade); });
     baslik = '🔴 Gecikmiş Ödemeler (' + liste.length + ')';
   } else {
-    liste = odemeler.filter(function(o){ var d=daysUntil(o.vade); return o.durum!=='odendi' && d>=0 && d<=5; })
+    liste = odemeler.filter(function(o){ var d=daysUntil(o.vade); return odemeOdenmemisMi(o) && d>=0 && d<=5; })
                     .sort(function(a,b){ return new Date(a.vade)-new Date(b.vade); });
     baslik = '🟡 5 Gün İçindeki Ödemeler (' + liste.length + ')';
   }
@@ -3046,11 +3071,11 @@ function showAlertModal(tip) {
 
 function renderAlerts() {
   var _tmp_ = entityData(); var odemeler = _tmp_.odemeler;
-  var overdue = odemeler.filter(function(o){ return o.durum !== 'odendi' && daysUntil(o.vade) < 0; });
-  var soon    = odemeler.filter(function(o){ var d = daysUntil(o.vade); return o.durum !== 'odendi' && d >= 0 && d <= 5; });
+  var overdue = odemeler.filter(function(o){ return odemeOdenmemisMi(o) && daysUntil(o.vade) < 0; });
+  var soon    = odemeler.filter(function(o){ var d = daysUntil(o.vade); return odemeOdenmemisMi(o) && d >= 0 && d <= 5; });
   var html = '';
   if (overdue.length > 0) {
-    var topTutar = overdue.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
+    var topTutar = overdue.reduce(function(s,o){return s+toTL({tutar: odemeAktifKalan(o), para: o.para});},0);
     html += '<div class="alert-banner" onclick="showAlertModal(\'gecikti\')" style="cursor:pointer;">' +
       '<span class="alert-icon">🔴</span>' +
       '<strong>' + overdue.length + ' gecikmiş ödeme</strong> var! Toplam: ' + fmtCurrency(topTutar) +
@@ -3058,7 +3083,7 @@ function renderAlerts() {
     '</div>';
   }
   if (soon.length > 0) {
-    var soonTutar = soon.reduce(function(s,o){return s+parseFloat(o.tutar||0);},0);
+    var soonTutar = soon.reduce(function(s,o){return s+toTL({tutar: odemeAktifKalan(o), para: o.para});},0);
     html += '<div class="alert-banner warn" onclick="showAlertModal(\'yaklasan\')" style="cursor:pointer;">' +
       '<span class="alert-icon">🟡</span>' +
       '<strong>' + soon.length + ' ödeme</strong> 5 gün içinde! Toplam: ' + fmtCurrency(soonTutar) +
@@ -3080,17 +3105,17 @@ function renderSummaryCards() {
 
   var monthDue = odemeler.filter(o => {
     var d = parseDate(o.vade);
-    return d && d >= monthStart && d <= monthEnd && o.durum !== 'odendi';
+    return d && d >= monthStart && d <= monthEnd && odemeOdenmemisMi(o);
   });
-  var overdue = odemeler.filter(o => o.durum !== 'odendi' && daysUntil(o.vade) < 0);
+  var overdue = odemeler.filter(o => odemeOdenmemisMi(o) && daysUntil(o.vade) < 0);
   var paid = odemeler.filter(o => {
     var d = parseDate(o.odeme_tarihi || o.vade);
     return o.durum === 'odendi' && d && d >= monthStart && d <= monthEnd;
   });
 
-  document.getElementById('sum-month-due').textContent = fmtCurrency(monthDue.reduce((s,o)=>s+toTL(o),0));
+  document.getElementById('sum-month-due').textContent = fmtCurrency(monthDue.reduce((s,o)=>s+toTL({tutar: odemeAktifKalan(o), para: o.para}),0));
   document.getElementById('sum-month-count').textContent = monthDue.length + ' ödeme';
-  document.getElementById('sum-overdue').textContent = fmtCurrency(overdue.reduce((s,o)=>s+toTL(o),0));
+  document.getElementById('sum-overdue').textContent = fmtCurrency(overdue.reduce((s,o)=>s+toTL({tutar: odemeAktifKalan(o), para: o.para}),0));
   document.getElementById('sum-overdue-count').textContent = overdue.length + ' ödeme';
   document.getElementById('sum-paid').textContent = fmtCurrency(paid.reduce((s,o)=>s+toTL(o),0));
   document.getElementById('sum-paid-count').textContent = paid.length + ' ödeme';
@@ -3135,7 +3160,7 @@ function renderSummaryCards() {
   // Genel borç özeti — sadece kalan/bekleyen borçlar
   if (document.getElementById('oz-gt-toplam')) {
     var digerOdemeler = odemeler.filter(function(o){ return o.tip !== 'taksit'; });
-    var digerKalanTutar  = digerOdemeler.filter(function(o){return o.durum!=='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
+    var digerKalanTutar  = digerOdemeler.filter(function(o){return odemeOdenmemisMi(o);}).reduce(function(s,o){return s+toTL({tutar: odemeAktifKalan(o), para: o.para});},0);
     var digerOdenenTutar = digerOdemeler.filter(function(o){return o.durum==='odendi';}).reduce(function(s,o){return s+toTL(o);},0);
 
     var genelKalanTutar  = krediKalan + cekBekleyen + digerKalanTutar;
@@ -3510,18 +3535,17 @@ function renderOdemeler() {
   // Özet kartlar — dönem/tip/para filtreli veri setinden hesapla
   var ozKart = document.getElementById('odeme-ozet-kartlar');
   if (ozKart) {
-    var topTutar  = ozOdemeler.reduce(function(s,o){return s+toTL(o);},0);
+    var topTutar  = ozOdemeler.reduce(function(s,o){ return s + (odemeOdenmemisMi(o) ? toTL(o) : toTL({ tutar: odemeTutarBreakdown(o).odenen, para: o.para })); },0);
     var odTutar   = ozOdemeler.reduce(function(s,o){ return s + toTL({ tutar: odemeTutarBreakdown(o).odenen, para: o.para }); },0);
     var bekTutar  = ozOdemeler.reduce(function(s,o){
-      var b = odemeTutarBreakdown(o);
-      return s + (o.durum === 'bekliyor' ? toTL({ tutar: b.kalan, para: o.para }) : 0);
+      return s + (o.durum === 'bekliyor' ? toTL({ tutar: odemeAktifKalan(o), para: o.para }) : 0);
     },0);
     var gecTutar  = ozOdemeler.reduce(function(s,o){
-      var b = odemeTutarBreakdown(o);
-      return s + (o.durum === 'gecikti' ? toTL({ tutar: b.kalan, para: o.para }) : 0);
+      return s + (o.durum === 'gecikti' ? toTL({ tutar: odemeAktifKalan(o), para: o.para }) : 0);
     },0);
     var kalanBorc = bekTutar + gecTutar;
     var odSay     = ozOdemeler.filter(function(o){return o.durum==='odendi';}).length;
+    var asgSay    = ozOdemeler.filter(function(o){return o.durum==='asgari_odendi';}).length;
     var bekSay    = ozOdemeler.filter(function(o){return o.durum==='bekliyor';}).length;
     var gecSay    = ozOdemeler.filter(function(o){return o.durum==='gecikti';}).length;
     var pct       = (odTutar + kalanBorc) > 0 ? Math.round((odTutar / (odTutar + kalanBorc)) * 100) : 0;
@@ -3539,7 +3563,7 @@ function renderOdemeler() {
       '<div class="card" style="--accent-color:var(--c-green);">' +
         '<div class="card-label">Ödenen</div>' +
         '<div class="card-value green" style="font-size:20px;">' + fmtCurrency(odTutar) + '</div>' +
-        '<div class="card-sub">' + odSay + ' ödeme tamamlandı</div>' +
+        '<div class="card-sub">' + odSay + ' tam · ' + asgSay + ' asgari ödendi</div>' +
       '</div>' +
       '<div class="card" style="--accent-color:var(--c-orange);">' +
         '<div class="card-label">Bekleyen</div>' +
@@ -3564,9 +3588,9 @@ function renderOdemeler() {
 
   document.getElementById('odemeler-list').innerHTML = odemeler.map(function(o) {
     var days = daysUntil(o.vade);
-    var vadRenk = days !== null && days < 0 && o.durum !== 'odendi' ? 'var(--red)' : days !== null && days <= 5 && o.durum !== 'odendi' ? 'var(--orange)' : 'var(--text)';
+    var vadRenk = days !== null && days < 0 && odemeOdenmemisMi(o) ? 'var(--red)' : days !== null && days <= 5 && odemeOdenmemisMi(o) ? 'var(--orange)' : 'var(--text)';
     var gunYazi = '';
-    if (days !== null && o.durum !== 'odendi') {
+    if (days !== null && odemeOdenmemisMi(o)) {
       gunYazi = days < 0 ? Math.abs(days)+' gün geçti' : days === 0 ? 'Bugün!' : days+' gün kaldı';
     }
     // Dövizli ödemelerde TL karşılığı
@@ -3606,7 +3630,7 @@ function renderOdemeler() {
       '<td>' + statusBadge(o.durum, o) + '</td>' +
       '<td>' +
         '<div style="display:flex;gap:4px;flex-wrap:nowrap;">' +
-          (o.durum !== 'odendi' ? '<button class="btn btn-xs" style="background:#16a34a;color:#fff;border:none;white-space:nowrap;" onclick="markPaid(\'' + o.id + '\')">✓ Öde</button>' : '') +
+          (odemeOdenmemisMi(o) ? '<button class="btn btn-xs" style="background:#16a34a;color:#fff;border:none;white-space:nowrap;" onclick="markPaid(\'' + o.id + '\')">✓ Öde</button>' : '') +
           '<button class="btn btn-xs btn-outline" onclick="editOdeme(\'' + o.id + '\')" title="Düzenle">✏</button>' +
           '<button class="btn btn-xs btn-danger" onclick="deleteOdeme(\'' + o.id + '\')" title="Sil">✕</button>' +
         '</div>' +
@@ -4402,7 +4426,7 @@ function renderCalSidebar(odemeler, plan, tahsilatlar) {
 
   // Bekleyen ödemeler (bugün ve sonrası)
   odemeler.forEach(function(o) {
-    if (!o.vade || o.durum === 'odendi') return;
+    if (!o.vade || !odemeOdenmemisMi(o)) return;
     var isCek   = o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('ek:') === 1;
     var isKredi = o.tip === 'taksit' || o.tip === 'kredi';
     var show = (isCek && calFilters.cekler) ||
@@ -4818,7 +4842,9 @@ function cfHesaplaAylar(odemeler, gelirler, baslangic) {
 
 function renderNakit() {
   var _tmp_ = entityData();
-  var odemeler = _tmp_.odemeler.filter(function(o){ return o.durum !== 'odendi'; });
+  var odemeler = _tmp_.odemeler.filter(function(o){ return odemeOdenmemisMi(o); }).map(function(o) {
+    return Object.assign({}, o, { tutar: odemeAktifKalan(o) });
+  }).filter(function(o){ return parseFloat(o.tutar || 0) > 0; });
   var baslangicBakiye = 2500000; // TODO: gerçek kasa bakiyesi
   var buAy = new Date().getMonth();
 
@@ -5062,11 +5088,20 @@ function saveOdeme() {
   var not = document.getElementById('odeme-not').value;
   if (!aciklama || !tutar || !vade) return alert('Açıklama, tutar ve vade tarihi zorunludur');
   if (odenen > tutar + 0.001) return alert('Ödenen tutar, toplam tutardan fazla olamaz');
-  if (odenen > 0) durum = calcOdemeDurum(tutar, odenen);
+  if (tip === 'kredi-karti' && durum === 'odendi' && odenen < tutar - 0.001) {
+    return alert('Kredi kartı tam ödenmeden durum Ödendi yapılamaz');
+  }
+  if (odenen > 0 && tip !== 'kredi-karti') durum = calcOdemeDurum(tutar, odenen);
   var odemeEntity = (document.getElementById('odeme-entity') ? document.getElementById('odeme-entity').value : null) || currentEntity || 'solariz';
   var payload = { entity: odemeEntity, aciklama: aciklama, tip: tip, tutar: tutar, odenen_tutar: odenen, para: para,
     vade: vade, odeme_tarihi: odeme_tarihi, durum: durum, tekrar: tekrar, not: not,
     kaydeden: currentUser ? currentUser.ad : '' };
+  if (id && tip === 'kredi-karti') {
+    var ex = null;
+    var all = loadData().odemeler;
+    for (var i = 0; i < all.length; i++) { if (all[i].id === id) { ex = all[i]; break; } }
+    if (ex) payload.asgari_tutar = parseFloat(ex.asgari_tutar || 0);
+  }
   if (id) {
     payload.guncelleyen = currentUser ? currentUser.ad : '';
     apiPut('/api/odemeler/' + id, payload);
@@ -5257,8 +5292,12 @@ function markPaid(id, callback) {
       '<span style="color:var(--muted);">Açıklama:</span><strong>' + (odeme.aciklama||'-') + '</strong>' +
     '</div>' +
     '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">' +
-      '<span style="color:var(--muted);">İlk Tutar:</span><strong>' + fmtCurrency(b.ilk, b.para) + '</strong>' +
+      '<span style="color:var(--muted);">' + (odeme.tip === 'kredi-karti' ? 'Dönem Borcu:' : 'İlk Tutar:') + '</span><strong>' + fmtCurrency(b.ilk, b.para) + '</strong>' +
     '</div>' +
+    (odeme.tip === 'kredi-karti' && kkAsgariTutar(odeme) > 0 ?
+      '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">' +
+        '<span style="color:var(--muted);">Asgari:</span><strong style="color:#b45309;">' + fmtCurrency(kkAsgariTutar(odeme), b.para) + '</strong>' +
+      '</div>' : '') +
     '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">' +
       '<span style="color:var(--muted);">Ödenen:</span><strong style="color:#16a34a;">' + fmtCurrency(b.odenen, b.para) + '</strong>' +
     '</div>' +
@@ -5270,8 +5309,16 @@ function markPaid(id, callback) {
     '</div>' : 'Ödeme bilgisi yükleniyor...';
 
   document.getElementById('ode-onay-bilgi').innerHTML = bilgi;
-  document.getElementById('ode-onay-tutar').value = b ? b.kalan : '';
-  document.getElementById('ode-onay-kalan-hint').textContent = b ? ('Kalan borç: ' + fmtCurrency(b.kalan, b.para) + ' — bu sefer ödenecek tutar') : '';
+  var varsayilanTutar = b ? b.kalan : '';
+  if (odeme && odeme.tip === 'kredi-karti' && kkAsgariTutar(odeme) > 0) {
+    var kAsg = kkKalanAsgari(odeme);
+    if (kAsg > 0) varsayilanTutar = kAsg;
+  }
+  document.getElementById('ode-onay-tutar').value = varsayilanTutar;
+  document.getElementById('ode-onay-kalan-hint').textContent = b ?
+    (odeme && odeme.tip === 'kredi-karti' && kkAsgariTutar(odeme) > 0 && kkKalanAsgari(odeme) > 0 ?
+      ('Kalan asgari: ' + fmtCurrency(kkKalanAsgari(odeme), b.para) + ' · Tam kalan: ' + fmtCurrency(b.kalan, b.para)) :
+      ('Kalan borç: ' + fmtCurrency(b.kalan, b.para) + ' — bu sefer ödenecek tutar')) : '';
   document.getElementById('ode-onay-tarih').value = new Date().toISOString().split('T')[0];
   document.getElementById('ode-onay-not').value = '';
   openModal('ode-onay-modal');
@@ -5642,6 +5689,7 @@ function saveKrediKart() {
     tekrar:       'tek',
     not:          notStr || 'Kredi Kartı',
     banka:        banka || null,
+    asgari_tutar: asgari > 0 ? asgari : 0,
     kaydeden:     currentUser ? currentUser.ad : 'manuel'
   });
 
