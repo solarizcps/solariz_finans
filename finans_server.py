@@ -386,11 +386,11 @@ def update_odeme(oid):
     tutar = float(d.get('tutar', 0) or 0)
 
     conn.execute('''UPDATE odemeler SET
-        aciklama=?, tip=?, tutar=?, para=?, vade=?, odeme_tarihi=?,
+        entity=?, aciklama=?, tip=?, tutar=?, para=?, vade=?, odeme_tarihi=?,
         durum=?, tekrar=?, not_=?, guncelleyen=?, guncelleme=?,
         banka=?, cek_no=?, kredi_id=COALESCE(?,kredi_id)
         WHERE id=?''',
-        (d.get('aciklama'), d.get('tip'), tutar, d.get('para','TL'),
+        (d.get('entity'), d.get('aciklama'), d.get('tip'), tutar, d.get('para','TL'),
          d.get('vade'), d.get('odeme_tarihi',''), d.get('durum','bekliyor'),
          d.get('tekrar','tek'), d.get('not',''),
          d.get('guncelleyen'), datetime.now().isoformat(),
@@ -407,6 +407,15 @@ def update_odeme(oid):
 @app.route('/api/odemeler/<oid>', methods=['DELETE'])
 def delete_odeme(oid):
     conn = get_db()
+    row = conn.execute(
+        "SELECT id, kredi_id FROM odemeler WHERE id=?", (oid,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'not_found'}), 404
+    if row['kredi_id']:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'kredi_baglantisi', 'kredi_id': row['kredi_id']}), 409
     conn.execute("DELETE FROM odeme_kayitlari WHERE odeme_id=?", (oid,))
     conn.execute("DELETE FROM odemeler WHERE id=?", (oid,))
     conn.commit()

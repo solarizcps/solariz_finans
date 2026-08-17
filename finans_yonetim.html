@@ -1680,9 +1680,19 @@ body {
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Tutar (₺) <span style="color:var(--c-red)">*</span></label>
+          <label class="form-label">Tutar <span style="color:var(--c-red)">*</span></label>
           <input type="number" class="form-control" id="cek-tutar" placeholder="0.00" min="0" step="0.01">
         </div>
+        <div class="form-group">
+          <label class="form-label">Para Birimi</label>
+          <select class="form-control" id="cek-para">
+            <option value="TL">₺ TL</option>
+            <option value="USD">$ USD</option>
+            <option value="EUR">€ EUR</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label class="form-label">Ait Olduğu Firma</label>
           <select class="form-control" id="cek-entity">
@@ -1692,16 +1702,17 @@ body {
             <option value="sahsi">Şahsi</option>
           </select>
         </div>
-      </div>
-      <div class="form-row">
         <div class="form-group">
           <label class="form-label">Banka</label>
           <input type="text" class="form-control" id="cek-banka" placeholder="ör: Garanti, Akbank...">
         </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label class="form-label">Çek No</label>
           <input type="text" class="form-control" id="cek-no" placeholder="ör: 123456789">
         </div>
+        <div class="form-group"></div>
       </div>
       <div class="form-group">
         <label class="form-label">Not / Açıklama (opsiyonel)</label>
@@ -2402,12 +2413,16 @@ function refreshAll() {
 // ÇEKLER
 // ============================================================
 
+function isCekOdeme(o) {
+  return !!(o && o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('Çek:') === 0);
+}
+
 function renderCekler() {
   if (!document.getElementById('cek-list-container')) return;
   var _tmp_ = entityData();
   var odemeler = _tmp_.odemeler;
   var cekler = odemeler.filter(function(o) {
-    return o.tip === 'tedarikci' && o.aciklama && o.aciklama.indexOf('Çek:') === 0;
+    return isCekOdeme(o);
   }).sort(function(a,b){ return (a.vade||'') > (b.vade||'') ? 1 : -1; });
 
   var bekleyen  = cekler.filter(function(o){ return o.durum === 'bekliyor'; });
@@ -2494,7 +2509,8 @@ function renderCekler() {
         '<td style="padding:10px 16px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + notHtml + '</td>' +
         '<td style="padding:10px 16px;text-align:right;white-space:nowrap;">' +
           (o.durum!=='odendi' ? '<button class="btn btn-xs btn-outline" onclick="markPaid(\'' + o.id + '\');_cache.loaded=false;renderCekler();">✓ Öde</button> ' : '') +
-          '<button class="btn btn-xs btn-outline" onclick="openCekEditModalById(\'' + o.id + '\')">✏️</button>' +
+          '<button class="btn btn-xs btn-outline" onclick="openCekEditModalById(\'' + o.id + '\')">Düzenle</button> ' +
+          '<button class="btn btn-xs btn-danger" onclick="deleteCek(\'' + o.id + '\')">Sil</button>' +
         '</td>' +
       '</tr>';
     }).join('');
@@ -5088,7 +5104,10 @@ function editOdeme(id) {
 
 function deleteOdeme(id) {
   if (!confirm('Bu ödemeyi silmek istediğinize emin misiniz?')) return;
-  apiDelete('/api/odemeler/' + id);
+  if (!apiDelete('/api/odemeler/' + id)) {
+    alert('Silme işlemi başarısız oldu. Kayıt kredi taksiti ile bağlı olabilir.');
+    return;
+  }
   _cache.loaded = false;
   refreshAll();
 }
@@ -5100,10 +5119,11 @@ function openCekModal() {
   document.getElementById('cek-firma').value = '';
   document.getElementById('cek-vade').value = '';
   document.getElementById('cek-tutar').value = '';
+  document.getElementById('cek-para').value = 'TL';
   document.getElementById('cek-banka').value = '';
   document.getElementById('cek-no').value = '';
   document.getElementById('cek-not').value = '';
-  document.getElementById('cek-entity').value = 'solariz';
+  document.getElementById('cek-entity').value = getActiveEntityFilter() || currentEntity || 'solariz';
   openModal('cek-modal');
 }
 
@@ -5114,6 +5134,7 @@ function openCekEditModalById(id) {
     if (data.odemeler[i].id === id) { o = data.odemeler[i]; break; }
   }
   if (!o) { alert('Çek bulunamadı'); return; }
+  if (!isCekOdeme(o)) { alert('Bu kayıt çek formatında değil'); return; }
   openCekEditModal(o);
 }
 
@@ -5123,7 +5144,8 @@ function openCekEditModal(o) {
   document.getElementById('cek-modal-title').textContent = '✏️ Çek Düzenle';
   document.getElementById('cek-firma').value = firma;
   document.getElementById('cek-vade').value = o.vade || '';
-  document.getElementById('cek-tutar').value = o.tutar || '';
+  document.getElementById('cek-tutar').value = roundMoney(o.tutar || 0);
+  document.getElementById('cek-para').value = o.para || 'TL';
   document.getElementById('cek-banka').value = o.banka || '';
   document.getElementById('cek-no').value = o.cek_no || '';
   var notVal = (o.not_ && o.not_ !== 'Çek') ? o.not_ : '';
@@ -5136,7 +5158,8 @@ function saveCek() {
   var editId = (document.getElementById('cek-edit-id').value || '').trim();
   var firma  = (document.getElementById('cek-firma').value || '').trim();
   var vade   = document.getElementById('cek-vade').value;
-  var tutar  = parseFloat(document.getElementById('cek-tutar').value);
+  var tutar  = parseMoney(document.getElementById('cek-tutar').value);
+  var para   = document.getElementById('cek-para').value || 'TL';
   var entity = document.getElementById('cek-entity').value;
   var banka  = (document.getElementById('cek-banka').value || '').trim();
   var cekNo  = (document.getElementById('cek-no').value || '').trim();
@@ -5146,16 +5169,26 @@ function saveCek() {
   if (!vade)              { alert('Vade tarihi zorunludur'); return; }
   if (!tutar || tutar <= 0) { alert('Geçerli bir tutar giriniz'); return; }
 
+  var existing = null;
+  if (editId) {
+    var all = loadData().odemeler;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].id === editId) { existing = all[i]; break; }
+    }
+    if (!existing) { alert('Çek bulunamadı'); return; }
+    if (!isCekOdeme(existing)) { alert('Bu kayıt çek formatında değil'); return; }
+  }
+
   var payload = {
     entity:       entity,
     aciklama:     'Çek: ' + firma,
     tip:          'tedarikci',
     tutar:        tutar,
-    para:         'TL',
+    para:         para,
     vade:         vade,
-    odeme_tarihi: '',
-    durum:        'bekliyor',
-    tekrar:       'tek',
+    odeme_tarihi: existing ? (existing.odeme_tarihi || '') : '',
+    durum:        existing ? (existing.durum || 'bekliyor') : 'bekliyor',
+    tekrar:       existing ? (existing.tekrar || 'tek') : 'tek',
     not:          not_ || 'Çek',
     banka:        banka || null,
     cek_no:       cekNo || null,
@@ -5163,12 +5196,45 @@ function saveCek() {
   };
 
   if (editId) {
+    payload.guncelleyen = currentUser ? currentUser.ad : '';
     apiPut('/api/odemeler/' + editId, payload);
   } else {
     apiPost('/api/odemeler', payload);
   }
   _cache.loaded = false;
+  reloadCache();
   closeModal('cek-modal');
+  refreshAll();
+}
+
+function deleteCek(id) {
+  if (!id) { alert('Geçersiz kayıt'); return; }
+  var data = loadData();
+  var o = null;
+  for (var i = 0; i < data.odemeler.length; i++) {
+    if (data.odemeler[i].id === id) { o = data.odemeler[i]; break; }
+  }
+  if (!o) { alert('Çek bulunamadı'); return; }
+  if (!isCekOdeme(o)) { alert('Bu kayıt çek formatında değil'); return; }
+  if (o.kredi_id) {
+    alert('Bu çek bir kredi taksiti ile bağlı (kredi_id: ' + o.kredi_id + '). Silinemez.');
+    return;
+  }
+  var kayitlar = (data.odemeKayitlari || []).filter(function(k) { return k.odeme_id === id; });
+  if (kayitlar.length > 0) {
+    alert('Bu çekte ' + kayitlar.length + ' kısmi ödeme kaydı var. Silmeden önce ödeme geçmişini kontrol edin.');
+    return;
+  }
+  if (parseFloat(o.odenen_tutar || 0) > 0.01) {
+    alert('Bu çekte ödenen tutar var. Ödeme yapılmış çek silinemez.');
+    return;
+  }
+  if (!confirm('Bu çek kaydını silmek istediğinize emin misiniz?')) return;
+  if (!apiDelete('/api/odemeler/' + id)) {
+    alert('Silme işlemi başarısız oldu.');
+    return;
+  }
+  _cache.loaded = false;
   refreshAll();
 }
 
